@@ -30,6 +30,7 @@ class GokartBot(commands.Bot):
         self.store = store
         self.image_dir = config.image_dir
         self.min_ocr_confidence = config.min_ocr_confidence
+        self.ocr_mode = config.ocr_mode
         self.ocr = OcrEngine(
             max_side=config.ocr_max_side,
             det_limit_side_len=config.ocr_det_limit_side_len,
@@ -37,6 +38,8 @@ class GokartBot(commands.Bot):
             rec_model=config.ocr_rec_model,
             cpu_threads=config.ocr_cpu_threads,
             rectify_table=config.ocr_rectify_table,
+            debug_ocr=config.debug_ocr,
+            debug_dir=config.debug_dir,
         )
 
     async def setup_hook(self) -> None:
@@ -86,12 +89,13 @@ class GokartBot(commands.Bot):
         await attachment.save(image_path)
 
         try:
-            ocr_items = await asyncio.to_thread(self.ocr.recognize, image_path)
-            parsed = parse_lap_sheet(ocr_items, self.min_ocr_confidence)
-            if any(kart.kart_no is None for kart in parsed.karts):
-                fallback_items = await asyncio.to_thread(self.ocr.recognize, image_path, False)
-                fallback = parse_lap_sheet(fallback_items, self.min_ocr_confidence)
-                _fill_missing_kart_numbers(parsed, fallback)
+            if self.ocr_mode == "legacy":
+                ocr_items = await asyncio.to_thread(self.ocr.recognize, image_path)
+                parsed = parse_lap_sheet(ocr_items, self.min_ocr_confidence)
+                raw_ocr = {"mode": "legacy", "items": [item.to_dict() for item in ocr_items]}
+            else:
+                parsed = await asyncio.to_thread(self.ocr.recognize_lap_sheet, image_path, session_id)
+                raw_ocr = parsed.raw_debug_summary or {"mode": "grid"}
         except Exception as exc:
             LOGGER.exception("OCR failed for %s", attachment.filename)
             await progress.edit(content=f"辨識失敗：{exc}")
@@ -110,7 +114,7 @@ class GokartBot(commands.Bot):
             heat=parsed.heat,
             ocr_confidence=parsed.ocr_confidence,
             warnings=parsed.warnings,
-            raw_ocr={"items": [item.to_dict() for item in ocr_items]},
+            raw_ocr=raw_ocr,
             karts=parsed.karts,
         )
         self.store.add_session(session)
@@ -316,16 +320,6 @@ def _parse_laps_argument(value: str) -> list[float]:
             continue
         laps.append(float(stripped))
     return laps
-
-
-def _fill_missing_kart_numbers(primary, fallback) -> None:
-    fallback_by_position = {kart.position: kart for kart in fallback.karts if kart.kart_no is not None}
-    for kart in primary.karts:
-        if kart.kart_no is not None:
-            continue
-        fallback_kart = fallback_by_position.get(kart.position)
-        if fallback_kart is not None:
-            kart.kart_no = fallback_kart.kart_no
 
 
 def _fit_discord_message(content: str) -> str:

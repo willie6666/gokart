@@ -5,7 +5,12 @@ import os
 from pathlib import Path
 from typing import Any
 
+from .cell_ocr import CellOcrEngine
+from .grid_parser import parse_grid_sheet
 from .image_preprocess import preprocess_image
+from .ocr_debug import write_cell_ocr, write_debug_parsed, write_parsed_overlay
+from .parser import ParsedSheet
+from .table_grid import extract_table_grid
 
 
 @dataclass(frozen=True)
@@ -45,6 +50,8 @@ class OcrEngine:
         rec_model: str = "PP-OCRv5_server_rec",
         cpu_threads: int = 1,
         rectify_table: bool = True,
+        debug_ocr: bool = False,
+        debug_dir: Path | str = Path("data/debug"),
     ) -> None:
         self._ocr = None
         self.max_side = max_side
@@ -53,6 +60,8 @@ class OcrEngine:
         self.rec_model = rec_model
         self.cpu_threads = cpu_threads
         self.rectify_table = rectify_table
+        self.debug_ocr = debug_ocr
+        self.debug_dir = Path(debug_dir)
 
     def _load(self) -> Any:
         if self._ocr is None:
@@ -98,6 +107,26 @@ class OcrEngine:
         finally:
             if input_path == processed:
                 processed.unlink(missing_ok=True)
+
+    def recognize_lap_sheet(self, image_path: Path, session_id: str | None = None) -> ParsedSheet:
+        debug_dir = self._debug_dir(session_id)
+        grid = extract_table_grid(image_path, debug_dir, self.max_side)
+        if grid.row_count < 10 or grid.col_count < 6:
+            raise RuntimeError("Grid detection failed; not enough table rows or columns")
+        cell_engine = CellOcrEngine(paddle_ocr=None)
+        if not cell_engine.has_tesseract:
+            cell_engine = CellOcrEngine(paddle_ocr=self._load())
+        ocr_cells = cell_engine.recognize_grid(grid, debug_dir)
+        parsed = parse_grid_sheet(grid, ocr_cells)
+        write_cell_ocr(ocr_cells, debug_dir)
+        write_debug_parsed(parsed, debug_dir)
+        write_parsed_overlay(grid, parsed, debug_dir)
+        return parsed
+
+    def _debug_dir(self, session_id: str | None) -> Path | None:
+        if not self.debug_ocr:
+            return None
+        return self.debug_dir / f"session-{session_id or 'manual'}"
 
 
 def _normalize_result(result: Any) -> list[OcrText]:

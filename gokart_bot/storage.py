@@ -90,20 +90,33 @@ class JsonStore:
             self.save()
 
     def claim_kart(self, session_id: str, kart_no: int, user_id: int, display_name: str) -> SessionRecord:
+        session = self.get_session(session_id)
+        if session is None:
+            raise ValueError(f"Session {session_id} not found")
+        kart = session.find_kart(kart_no)
+        if kart is None:
+            raise ValueError(f"Kart {kart_no} not found in session {session_id}")
+        if kart.position is None:
+            raise ValueError(f"Kart {kart_no} has no claimable position")
+        return self.claim_position(session_id, kart.position, user_id, display_name)
+
+    def claim_position(self, session_id: str, position: int, user_id: int, display_name: str) -> SessionRecord:
         with self._lock:
             self.upsert_user(user_id, display_name)
             session = self.get_session(session_id)
             if session is None:
                 raise ValueError(f"Session {session_id} not found")
-            kart = session.find_kart(kart_no)
+            kart = next((candidate for candidate in session.karts if candidate.position == position), None)
             if kart is None:
-                raise ValueError(f"Kart {kart_no} not found in session {session_id}")
+                raise ValueError(f"Position {position} not found in session {session_id}")
+            kart_label = f"kart {kart.kart_no}" if kart.kart_no is not None else f"position {position}"
             if kart.claimed_by_user_id is not None and kart.claimed_by_user_id != user_id:
-                raise ValueError(f"Kart {kart_no} is already claimed by {kart.claimed_by_name}")
+                raise ValueError(f"{kart_label} is already claimed by {kart.claimed_by_name}")
             for other in session.karts:
-                if other.claimed_by_user_id == user_id and other.kart_no != kart_no:
+                if other.claimed_by_user_id == user_id and other.position != position:
+                    other_label = f"kart {other.kart_no}" if other.kart_no is not None else f"position {other.position}"
                     raise ValueError(
-                        f"You already claimed kart {other.kart_no} in this session. "
+                        f"You already claimed {other_label} in this session. "
                         "Use /unclaim first if you need to change it."
                     )
             kart.claimed_by_user_id = user_id

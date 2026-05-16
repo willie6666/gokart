@@ -51,6 +51,26 @@ def test_json_store_rejects_claiming_two_karts_in_same_session(tmp_path) -> None
     assert unchanged.find_kart(7).claimed_by_user_id is None
 
 
+def test_json_store_claims_duplicate_kart_numbers_by_position(tmp_path) -> None:
+    store = JsonStore(tmp_path / "records.json")
+    session = SessionRecord(
+        id="1",
+        channel_id=10,
+        source_message_id=20,
+        image_url="https://example.com/image.jpg",
+        author_user_id=1,
+        author_name="author",
+        created_at=now_iso(),
+        karts=[KartResult(kart_no=7, position=1, best_lap=19.65), KartResult(kart_no=7, position=2, best_lap=20.18)],
+    )
+    store.add_session(session)
+
+    claimed = store.claim_position("1", 2, 99, "driver")
+
+    assert claimed.karts[0].claimed_by_user_id is None
+    assert claimed.karts[1].claimed_by_user_id == 99
+
+
 def test_fix_kart_with_laps(tmp_path) -> None:
     store = JsonStore(tmp_path / "records.json")
     session = SessionRecord(

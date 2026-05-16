@@ -30,7 +30,7 @@ def format_session(session: SessionRecord) -> str:
 
 
 def format_kart_line(kart: KartResult) -> str:
-    kart_label = f"車號 {kart.kart_no}" if kart.kart_no is not None else "車號未知"
+    kart_label = f"車號 {kart.kart_no}" if kart.kart_no is not None else f"未知欄位 {kart.position or '?'}"
     best = f"{kart.best_lap:.2f}s" if kart.best_lap is not None else "未知"
     laps = f"{len(kart.laps)} 圈" if kart.laps else "圈數未知"
     claimed = f"，已認領：{kart.claimed_by_name}" if kart.claimed_by_name else ""
@@ -88,7 +88,7 @@ def format_user_records(user_id: int, sessions: list[SessionRecord], display_nam
     for session, kart in claimed[:10]:
         label = _session_label(session)
         best = f"{kart.best_lap:.2f}s" if kart.best_lap is not None else "未知"
-        kart_label = f"車號 {kart.kart_no}" if kart.kart_no is not None else "車號未知"
+        kart_label = f"車號 {kart.kart_no}" if kart.kart_no is not None else f"未知欄位 {kart.position or '?'}"
         lines.append(f"#{session.id} {label} {kart_label}：{best}")
     return "\n".join(lines)
 
@@ -109,7 +109,7 @@ def format_myrecords(user_id: int, sessions: list[SessionRecord], limit: int = 5
         label = _session_label(session)
         best = f"{kart.best_lap:.2f}s" if kart.best_lap is not None else "未知"
         avg = f"{kart.avg_lap:.2f}s" if kart.avg_lap is not None else "未知"
-        kart_label = f"車號 {kart.kart_no}" if kart.kart_no is not None else "車號未知"
+        kart_label = f"車號 {kart.kart_no}" if kart.kart_no is not None else f"未知欄位 {kart.position or '?'}"
         lines.append(f"#{session.id} {label} {kart_label}：最佳 {best}，平均 {avg}，{len(kart.laps)} 圈")
     return "\n".join(lines)
 

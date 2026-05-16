@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from .models import KartResult
-from .ocr import OcrText
+
+if TYPE_CHECKING:
+    from .ocr import OcrText
 
 
 DATE_RE = re.compile(r"(?:Date\s*[:：]?\s*)?(20\d{2}\s*/\s*\d{1,2}\s*/\s*\d{1,2})", re.IGNORECASE)
@@ -23,6 +26,7 @@ class ParsedSheet:
     ocr_confidence: float | None = None
     warnings: list[str] = field(default_factory=list)
     karts: list[KartResult] = field(default_factory=list)
+    raw_debug_summary: dict[str, Any] = field(default_factory=dict)
 
 
 def parse_lap_sheet(items: list[OcrText], min_confidence: float = 0.50) -> ParsedSheet:
@@ -164,7 +168,6 @@ def _parse_by_coordinates(items: list[OcrText]) -> list[KartResult]:
                 laps=laps,
             )
         )
-    _infer_missing_kart_numbers(results)
     return results
 
 
@@ -184,11 +187,6 @@ def _parse_by_text_order(items: list[OcrText]) -> list[KartResult]:
             if value not in kart_numbers:
                 kart_numbers.append(value)
     return [KartResult(kart_no=value, position=index + 1) for index, value in enumerate(kart_numbers)]
-
-
-def _infer_missing_kart_numbers(karts: list[KartResult]) -> None:
-    if len(karts) >= 2 and karts[0].kart_no is None and karts[0].position == 1 and karts[1].kart_no == 2:
-        karts[0].kart_no = 1
 
 
 @dataclass

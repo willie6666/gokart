@@ -16,6 +16,7 @@ def test_normalize_lap_text() -> None:
 def test_normalize_kart_no() -> None:
     assert normalize_kart_no("12") == 12
     assert normalize_kart_no("O7") == 7
+    assert normalize_kart_no("5 77") == 5
     assert normalize_kart_no("0") is None
     assert normalize_kart_no("1000") is None
 

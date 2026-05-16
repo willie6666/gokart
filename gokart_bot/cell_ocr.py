@@ -63,9 +63,15 @@ class CellOcrEngine:
         return " ".join(texts).strip(), round(sum(scores) / len(scores), 3) if scores else None
 
     def recognize_grid(self, grid: TableGrid, debug_dir: Path | None = None) -> dict[tuple[int, int], CellOcrResult]:
-        if not self.has_tesseract and self.paddle_ocr is not None:
-            return self._recognize_grid_with_paddle_table(grid, debug_dir)
+        if self.paddle_ocr is not None:
+            paddle_results = self._recognize_grid_with_paddle_table(grid, debug_dir)
+            if self.has_tesseract:
+                return _merge_tesseract_headers_with_paddle_laps(self._recognize_grid_with_tesseract(grid, debug_dir), paddle_results)
+            return paddle_results
 
+        return self._recognize_grid_with_tesseract(grid, debug_dir)
+
+    def _recognize_grid_with_tesseract(self, grid: TableGrid, debug_dir: Path | None = None) -> dict[tuple[int, int], CellOcrResult]:
         cells_dir = debug_dir / "cells" if debug_dir else None
         if cells_dir:
             cells_dir.mkdir(parents=True, exist_ok=True)
@@ -122,13 +128,14 @@ def normalize_kart_no(text: str) -> int | None:
     text = text.strip()
     text = text.replace("O", "0").replace("o", "0")
     text = text.replace("I", "1").replace("l", "1").replace("|", "1")
-    text = re.sub(r"[^0-9]", "", text)
-    if not re.fullmatch(r"\d{1,3}", text):
+    if re.fullmatch(r"\d{4,}", text):
         return None
-    value = int(text)
-    if value <= 0 or value > 999:
-        return None
-    return value
+    tokens = re.findall(r"\d{1,3}", text)
+    for token in tokens:
+        value = int(token)
+        if 0 < value <= 999:
+            return value
+    return None
 
 
 def normalize_lap_text(text: str) -> str:
@@ -233,6 +240,29 @@ def _write_paddle_items(items: list[tuple[str, float | None, float, float]], deb
     with (debug_dir / "paddle_ocr_items.json").open("w", encoding="utf-8") as file:
         json.dump(payload, file, ensure_ascii=False, indent=2)
         file.write("\n")
+
+
+def _merge_tesseract_headers_with_paddle_laps(
+    tesseract_results: dict[tuple[int, int], CellOcrResult],
+    paddle_results: dict[tuple[int, int], CellOcrResult],
+) -> dict[tuple[int, int], CellOcrResult]:
+    merged = dict(tesseract_results)
+    lap_row = _find_lap_row(tesseract_results)
+    for key, paddle_cell in paddle_results.items():
+        if not paddle_cell.raw_text.strip():
+            continue
+        tesseract_cell = merged.get(key)
+        if tesseract_cell is None or not tesseract_cell.raw_text.strip() or (lap_row is not None and key[0] > lap_row):
+            merged[key] = paddle_cell
+    return merged
+
+
+def _find_lap_row(cells: dict[tuple[int, int], CellOcrResult]) -> int | None:
+    for (row, _), cell in sorted(cells.items()):
+        normalized = re.sub(r"[^a-z]", "", cell.raw_text.lower())
+        if normalized in {"lapnr", "lpnr", "lapn", "lpn", "lapno", "lapnumber", "lap"}:
+            return row
+    return None
 
 
 def _cell_at(grid: TableGrid, x: float, y: float) -> tuple[int, int] | None:

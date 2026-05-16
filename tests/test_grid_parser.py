@@ -43,9 +43,57 @@ def test_unknown_kart_number_is_not_auto_filled() -> None:
         (2, 3): cell(2, 3, "2"),
         (3, 2): cell(3, 2, "19.42"),
         (3, 3): cell(3, 3, "24.26"),
+        (4, 2): cell(4, 2, "19.57"),
+        (4, 3): cell(4, 3, "24.58"),
     }
 
     parsed = parse_grid_sheet(grid(), cells)
 
     assert [kart.kart_no for kart in parsed.karts[:2]] == [None, 2]
     assert parsed.karts[0].best_lap == 19.42
+
+
+def test_parse_grid_sheet_ignores_single_lap_noise_columns() -> None:
+    cells = {
+        (2, 1): cell(2, 1, "Lap/Nr"),
+        (2, 2): cell(2, 2, "3"),
+        (2, 3): cell(2, 3, "7"),
+        (3, 2): cell(3, 2, "20.02"),
+        (4, 2): cell(4, 2, "19.69"),
+        (3, 3): cell(3, 3, "21.11"),
+    }
+
+    parsed = parse_grid_sheet(grid(), cells)
+
+    assert [kart.kart_no for kart in parsed.karts] == [3]
+
+
+def test_parse_grid_sheet_drops_obvious_lap_outliers() -> None:
+    cells = {
+        (2, 1): cell(2, 1, "Lap/Nr"),
+        (2, 2): cell(2, 2, "5"),
+        (3, 2): cell(3, 2, "24.63"),
+        (4, 2): cell(4, 2, "23.29"),
+        (5, 2): cell(5, 2, "22.88"),
+        (6, 2): cell(6, 2, "22.47"),
+        (7, 2): cell(7, 2, "70.05"),
+    }
+
+    parsed = parse_grid_sheet(grid(), cells)
+
+    assert parsed.karts[0].laps == [24.63, 23.29, 22.88, 22.47]
+
+
+def test_parse_grid_sheet_extracts_multiple_laps_from_merged_cell() -> None:
+    cells = {
+        (2, 1): cell(2, 1, "Lap/Nr"),
+        (2, 2): cell(2, 2, "5"),
+        (3, 2): cell(3, 2, "24.63"),
+        (4, 2): cell(4, 2, "22.17"),
+        (5, 2): cell(5, 2, "24.01 23.67 26.03"),
+    }
+
+    parsed = parse_grid_sheet(grid(), cells)
+
+    assert parsed.karts[0].best_lap == 22.17
+    assert parsed.karts[0].laps == [24.63, 22.17, 24.01, 23.67, 26.03]

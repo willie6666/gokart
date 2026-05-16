@@ -113,9 +113,7 @@ class OcrEngine:
         grid = extract_table_grid(image_path, debug_dir, self.max_side)
         if grid.row_count < 10 or grid.col_count < 6:
             raise RuntimeError("Grid detection failed; not enough table rows or columns")
-        cell_engine = CellOcrEngine(paddle_ocr=None)
-        if not cell_engine.has_tesseract:
-            cell_engine = CellOcrEngine(paddle_ocr=self._load())
+        cell_engine = CellOcrEngine(paddle_ocr=self._load())
         ocr_cells = cell_engine.recognize_grid(grid, debug_dir)
         parsed = parse_grid_sheet(grid, ocr_cells)
         write_cell_ocr(ocr_cells, debug_dir)

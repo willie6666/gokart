@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from .cell_ocr import CellOcrResult, normalize_kart_no, parse_lap_time
+from .cell_ocr import CellOcrResult, normalize_kart_no, normalize_lap_text, parse_lap_time
 from .models import KartResult
 from .parser import ParsedSheet, _find_date, _find_heat, _find_time
 from .table_grid import TableGrid
@@ -37,10 +37,9 @@ def parse_grid_sheet(
         kart_no = normalize_kart_no(_cell_text(ocr_cells, kart_row, col))
         laps: list[float] = []
         for row in range(kart_row + 1, stop_row):
-            lap = parse_lap_time(_cell_text(ocr_cells, row, col))
-            if lap is not None:
-                laps.append(lap)
-        if kart_no is None and not laps:
+            laps.extend(_parse_lap_times(_cell_text(ocr_cells, row, col)))
+        laps = _drop_column_outliers(laps)
+        if len(laps) < 2:
             continue
         results.append(
             KartResult(
@@ -89,4 +88,25 @@ def _cell_text(ocr_cells: dict[tuple[int, int], CellOcrResult], row: int, col: i
     cell = ocr_cells.get((row, col))
     if cell is None:
         return ""
-    return cell.normalized_text or cell.raw_text
+    return cell.raw_text or cell.normalized_text
+
+
+def _drop_column_outliers(laps: list[float]) -> list[float]:
+    if len(laps) < 4:
+        return laps
+    sorted_laps = sorted(laps)
+    median = sorted_laps[len(sorted_laps) // 2]
+    upper_limit = max(35.0, median * 1.6)
+    return [lap for lap in laps if lap <= upper_limit]
+
+
+def _parse_lap_times(text: str) -> list[float]:
+    lap = parse_lap_time(text)
+    if lap is not None:
+        return [lap]
+    laps: list[float] = []
+    for token in re.findall(r"\d{1,2}[\.,:]\d{2,3}|\d{4,5}", text):
+        lap = parse_lap_time(normalize_lap_text(token))
+        if lap is not None:
+            laps.append(lap)
+    return laps

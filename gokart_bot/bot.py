@@ -11,7 +11,7 @@ from discord.ext import commands
 
 from .config import load_config
 from .discord_views import ClaimView
-from .formatting import format_laps, format_leaderboard, format_record_channel, format_session, format_user_records
+from .formatting import format_laps, format_leaderboard, format_myrecords, format_record_channel, format_session, format_user_records
 from .models import SessionRecord, now_iso
 from .ocr import OcrEngine
 from .parser import parse_lap_sheet
@@ -44,8 +44,11 @@ class GokartBot(commands.Bot):
             self.add_view(ClaimView(self.store, session.id), message_id=session.result_message_id)
 
         self.tree.add_command(me_command)
+        self.tree.add_command(profile_command)
+        self.tree.add_command(myrecords_command)
         self.tree.add_command(leaderboard_command)
         self.tree.add_command(session_command)
+        self.tree.add_command(heat_command)
         self.tree.add_command(laps_command)
         self.tree.add_command(fix_command)
         self.tree.add_command(unclaim_command)
@@ -53,6 +56,7 @@ class GokartBot(commands.Bot):
         self.tree.add_command(set_record_channel_command)
         self.tree.add_command(clear_record_channel_command)
         self.tree.add_command(sync_command)
+        self.tree.add_command(ping_command)
         await self.tree.sync()
 
     async def on_ready(self) -> None:
@@ -134,6 +138,24 @@ async def me_command(interaction: discord.Interaction) -> None:
     await interaction.response.send_message(_fit_discord_message(content), ephemeral=True)
 
 
+@app_commands.command(name="profile", description="查詢自己或指定使用者的卡丁車紀錄")
+@app_commands.describe(user="不填則查詢自己")
+async def profile_command(interaction: discord.Interaction, user: discord.User | None = None) -> None:
+    bot = _bot(interaction)
+    target = user or interaction.user
+    name = target.display_name if user else None
+    content = format_user_records(target.id, bot.store.all_sessions(), name)
+    await interaction.response.send_message(_fit_discord_message(content), ephemeral=True)
+
+
+@app_commands.command(name="myrecords", description="查詢自己最近幾場卡丁車紀錄")
+@app_commands.describe(limit="顯示最近幾場，預設 5")
+async def myrecords_command(interaction: discord.Interaction, limit: app_commands.Range[int, 1, 20] = 5) -> None:
+    bot = _bot(interaction)
+    content = format_myrecords(interaction.user.id, bot.store.all_sessions(), int(limit))
+    await interaction.response.send_message(_fit_discord_message(content), ephemeral=True)
+
+
 @app_commands.command(name="leaderboard", description="查詢伺服器卡丁車排行榜")
 @app_commands.describe(limit="顯示筆數，預設 10")
 async def leaderboard_command(interaction: discord.Interaction, limit: app_commands.Range[int, 1, 25] = 10) -> None:
@@ -149,6 +171,17 @@ async def session_command(interaction: discord.Interaction, session_id: str) -> 
     session = bot.store.get_session(session_id)
     if session is None:
         await interaction.response.send_message(f"找不到紀錄 #{session_id}", ephemeral=True)
+        return
+    await interaction.response.send_message(_fit_discord_message(format_session(session)), ephemeral=True)
+
+
+@app_commands.command(name="heat", description="查詢某場 Heat 辨識結果")
+@app_commands.describe(heat_id="紀錄編號，例如 1")
+async def heat_command(interaction: discord.Interaction, heat_id: str) -> None:
+    bot = _bot(interaction)
+    session = bot.store.get_session(heat_id)
+    if session is None:
+        await interaction.response.send_message(f"找不到紀錄 #{heat_id}", ephemeral=True)
         return
     await interaction.response.send_message(_fit_discord_message(format_session(session)), ephemeral=True)
 
@@ -255,6 +288,11 @@ async def sync_command(interaction: discord.Interaction) -> None:
     bot = _bot(interaction)
     await bot.tree.sync()
     await interaction.response.send_message("已同步指令。", ephemeral=True)
+
+
+@app_commands.command(name="ping", description="檢查 bot 是否在線")
+async def ping_command(interaction: discord.Interaction) -> None:
+    await interaction.response.send_message("pong", ephemeral=True)
 
 
 def _bot(interaction: discord.Interaction) -> GokartBot:

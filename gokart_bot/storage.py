@@ -102,9 +102,10 @@ class JsonStore:
                 raise ValueError(f"Kart {kart_no} is already claimed by {kart.claimed_by_name}")
             for other in session.karts:
                 if other.claimed_by_user_id == user_id and other.kart_no != kart_no:
-                    other.claimed_by_user_id = None
-                    other.claimed_by_name = None
-                    other.claimed_at = None
+                    raise ValueError(
+                        f"You already claimed kart {other.kart_no} in this session. "
+                        "Use /unclaim first if you need to change it."
+                    )
             kart.claimed_by_user_id = user_id
             kart.claimed_by_name = display_name
             kart.claimed_at = now_iso()

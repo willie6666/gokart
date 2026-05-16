@@ -1,4 +1,4 @@
-from gokart_bot.formatting import format_laps, format_leaderboard, format_session
+from gokart_bot.formatting import format_laps, format_leaderboard, format_myrecords, format_session, format_user_records
 from gokart_bot.models import KartResult, SessionRecord, now_iso
 
 
@@ -42,3 +42,23 @@ def test_leaderboard_is_table_like_and_hides_heat() -> None:
     assert "```text" in output
     assert "driver" in output
     assert "Heat 12" not in output
+
+
+def test_profile_display_includes_mvp_stats() -> None:
+    record = session()
+    record.find_kart(12).claimed_by_user_id = 99
+    output = format_user_records(99, [record])
+
+    assert "總場次：1" in output
+    assert "總圈數：2" in output
+    assert "個人最佳：19.65s" in output
+    assert "平均圈速：20.24s" in output
+
+
+def test_myrecords_display_recent_claims() -> None:
+    record = session()
+    record.find_kart(12).claimed_by_user_id = 99
+    output = format_myrecords(99, [record])
+
+    assert "最近 1 場紀錄" in output
+    assert "車號 12" in output

@@ -17,15 +17,15 @@ class ClaimView(discord.ui.View):
         claimable = [kart for kart in session.karts if kart.kart_no is not None]
         for index, kart in enumerate(claimable[:25]):
             disabled = kart.claimed_by_user_id is not None
-            button = ClaimButton(session_id, kart.kart_no, disabled=disabled)
+            button = ClaimButton(session_id, kart.kart_no, disabled=disabled, claimed_by_name=kart.claimed_by_name)
             button.row = index // 5
             self.add_item(button)
 
 
 class ClaimButton(discord.ui.Button[ClaimView]):
-    def __init__(self, session_id: str, kart_no: int, disabled: bool = False) -> None:
+    def __init__(self, session_id: str, kart_no: int, disabled: bool = False, claimed_by_name: str | None = None) -> None:
         super().__init__(
-            label=f"車號 {kart_no}",
+            label=f"車號 {kart_no} 已認領" if claimed_by_name else f"車號 {kart_no}",
             style=discord.ButtonStyle.primary if not disabled else discord.ButtonStyle.secondary,
             custom_id=f"gokart:claim:{session_id}:{kart_no}",
             disabled=disabled,
@@ -44,3 +44,9 @@ class ClaimButton(discord.ui.Button[ClaimView]):
 
         new_view = ClaimView(self.view.store, self.session_id)
         await interaction.response.edit_message(content=format_session(session), view=new_view)
+        kart = session.find_kart(self.kart_no)
+        best = f"{kart.best_lap:.2f}s" if kart and kart.best_lap is not None else "未知"
+        await interaction.followup.send(
+            f"{interaction.user.mention} 已認領紀錄 #{self.session_id} 的車號 {self.kart_no}。\n本次最佳圈速：{best}",
+            ephemeral=True,
+        )

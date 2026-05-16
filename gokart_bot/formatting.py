@@ -61,7 +61,39 @@ def format_laps(session: SessionRecord, kart_no: int | None = None) -> str:
     return "\n".join(lines)
 
 
-def format_user_records(user_id: int, sessions: list[SessionRecord]) -> str:
+def format_user_records(user_id: int, sessions: list[SessionRecord], display_name: str | None = None) -> str:
+    claimed: list[tuple[SessionRecord, KartResult]] = []
+    for session in sessions:
+        for kart in session.karts:
+            if kart.claimed_by_user_id == user_id:
+                claimed.append((session, kart))
+
+    if not claimed:
+        subject = display_name or "你"
+        return f"{subject}目前沒有認領過任何紀錄。"
+
+    claimed.sort(key=lambda item: item[1].best_lap if item[1].best_lap is not None else 999)
+    best_session, best_kart = claimed[0]
+    subject = display_name or "你"
+    total_laps = sum(len(kart.laps) for _, kart in claimed)
+    lap_values = [lap for _, kart in claimed for lap in kart.laps]
+    lines = [f"{subject}的卡丁車紀錄"]
+    lines.append(f"總場次：{len(claimed)}")
+    if total_laps:
+        lines.append(f"總圈數：{total_laps}")
+    lines.append(f"個人最佳：{best_kart.best_lap:.2f}s，車號 {best_kart.kart_no}，紀錄 #{best_session.id}")
+    if lap_values:
+        lines.append(f"平均圈速：{sum(lap_values) / len(lap_values):.2f}s")
+    lines.append("")
+    for session, kart in claimed[:10]:
+        label = _session_label(session)
+        best = f"{kart.best_lap:.2f}s" if kart.best_lap is not None else "未知"
+        kart_label = f"車號 {kart.kart_no}" if kart.kart_no is not None else "車號未知"
+        lines.append(f"#{session.id} {label} {kart_label}：{best}")
+    return "\n".join(lines)
+
+
+def format_myrecords(user_id: int, sessions: list[SessionRecord], limit: int = 5) -> str:
     claimed: list[tuple[SessionRecord, KartResult]] = []
     for session in sessions:
         for kart in session.karts:
@@ -71,16 +103,14 @@ def format_user_records(user_id: int, sessions: list[SessionRecord]) -> str:
     if not claimed:
         return "你目前沒有認領過任何紀錄。"
 
-    claimed.sort(key=lambda item: item[1].best_lap if item[1].best_lap is not None else 999)
-    best_session, best_kart = claimed[0]
-    lines = [f"你的紀錄共 {len(claimed)} 場。"]
-    lines.append(f"個人最佳：{best_kart.best_lap:.2f}s，車號 {best_kart.kart_no}，紀錄 #{best_session.id}")
-    lines.append("")
-    for session, kart in claimed[:10]:
+    claimed.sort(key=lambda item: int(item[0].id) if item[0].id.isdigit() else 0, reverse=True)
+    lines = [f"最近 {min(limit, len(claimed))} 場紀錄"]
+    for session, kart in claimed[:limit]:
         label = _session_label(session)
         best = f"{kart.best_lap:.2f}s" if kart.best_lap is not None else "未知"
+        avg = f"{kart.avg_lap:.2f}s" if kart.avg_lap is not None else "未知"
         kart_label = f"車號 {kart.kart_no}" if kart.kart_no is not None else "車號未知"
-        lines.append(f"#{session.id} {label} {kart_label}：{best}")
+        lines.append(f"#{session.id} {label} {kart_label}：最佳 {best}，平均 {avg}，{len(kart.laps)} 圈")
     return "\n".join(lines)
 
 

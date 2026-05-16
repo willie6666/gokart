@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: gokart-discord-bot
+Version: 0.1.0
+Summary: Discord bot for OCRing and tracking go-kart lap records.
+Requires-Python: >=3.12
+Requires-Dist: discord.py>=2.4.0
+Requires-Dist: python-dotenv>=1.0.1
+Requires-Dist: pillow>=10.4.0
+Requires-Dist: opencv-python>=4.10.0.84
+Requires-Dist: numpy>=2.0.0
+Requires-Dist: paddlepaddle>=3.0.0
+Requires-Dist: paddleocr>=3.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.3.0; extra == "dev"

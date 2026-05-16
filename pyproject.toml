@@ -1,0 +1,28 @@
+[project]
+name = "gokart-discord-bot"
+version = "0.1.0"
+description = "Discord bot for OCRing and tracking go-kart lap records."
+requires-python = ">=3.12"
+dependencies = [
+    "discord.py>=2.4.0",
+    "python-dotenv>=1.0.1",
+    "pillow>=10.4.0",
+    "opencv-python>=4.10.0.84",
+    "numpy>=2.0.0",
+    "paddlepaddle>=3.0.0",
+    "paddleocr>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["gokart_bot*"]
+exclude = ["data*", "example*", "tests*"]
+namespaces = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

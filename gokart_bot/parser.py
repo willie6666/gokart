@@ -202,7 +202,7 @@ def _find_lap_label(items: list[OcrText]) -> OcrText | None:
 
 def _looks_like_lap_label(text: str) -> bool:
     normalized = re.sub(r"[^a-z]", "", text.lower())
-    return normalized in {"lapnr", "lapn", "lap", "lapno", "lapnumber"} or "lapnr" in normalized
+    return normalized in {"lapnr", "lpnr", "lapn", "lpn", "lap", "lapno", "lapnumber"} or "lapnr" in normalized
 
 
 def _parse_kart_number(item: OcrText, position: int) -> int:

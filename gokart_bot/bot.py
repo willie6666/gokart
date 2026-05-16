@@ -36,6 +36,7 @@ class GokartBot(commands.Bot):
             det_model=config.ocr_det_model,
             rec_model=config.ocr_rec_model,
             cpu_threads=config.ocr_cpu_threads,
+            rectify_table=config.ocr_rectify_table,
         )
 
     async def setup_hook(self) -> None:
@@ -83,6 +84,10 @@ class GokartBot(commands.Bot):
         try:
             ocr_items = await asyncio.to_thread(self.ocr.recognize, image_path)
             parsed = parse_lap_sheet(ocr_items, self.min_ocr_confidence)
+            if any(kart.kart_no is None for kart in parsed.karts):
+                fallback_items = await asyncio.to_thread(self.ocr.recognize, image_path, False)
+                fallback = parse_lap_sheet(fallback_items, self.min_ocr_confidence)
+                _fill_missing_kart_numbers(parsed, fallback)
         except Exception as exc:
             LOGGER.exception("OCR failed for %s", attachment.filename)
             await progress.edit(content=f"辨識失敗：{exc}")
@@ -273,6 +278,16 @@ def _parse_laps_argument(value: str) -> list[float]:
             continue
         laps.append(float(stripped))
     return laps
+
+
+def _fill_missing_kart_numbers(primary, fallback) -> None:
+    fallback_by_position = {kart.position: kart for kart in fallback.karts if kart.kart_no is not None}
+    for kart in primary.karts:
+        if kart.kart_no is not None:
+            continue
+        fallback_kart = fallback_by_position.get(kart.position)
+        if fallback_kart is not None:
+            kart.kart_no = fallback_kart.kart_no
 
 
 def _fit_discord_message(content: str) -> str:

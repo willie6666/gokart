@@ -18,6 +18,7 @@ class Config:
     ocr_det_model: str
     ocr_rec_model: str
     ocr_cpu_threads: int
+    ocr_rectify_table: bool
 
 
 def load_config() -> Config:
@@ -37,4 +38,5 @@ def load_config() -> Config:
         ocr_det_model=os.environ.get("GOKART_OCR_DET_MODEL", "PP-OCRv5_mobile_det"),
         ocr_rec_model=os.environ.get("GOKART_OCR_REC_MODEL", "PP-OCRv5_mobile_rec"),
         ocr_cpu_threads=int(os.environ.get("GOKART_OCR_CPU_THREADS", "1")),
+        ocr_rectify_table=os.environ.get("GOKART_OCR_RECTIFY_TABLE", "true").strip().lower() not in {"0", "false", "no"},
     )

@@ -44,6 +44,7 @@ class OcrEngine:
         det_model: str = "PP-OCRv5_mobile_det",
         rec_model: str = "PP-OCRv5_mobile_rec",
         cpu_threads: int = 1,
+        rectify_table: bool = True,
     ) -> None:
         self._ocr = None
         self.max_side = max_side
@@ -51,6 +52,7 @@ class OcrEngine:
         self.det_model = det_model
         self.rec_model = rec_model
         self.cpu_threads = cpu_threads
+        self.rectify_table = rectify_table
 
     def _load(self) -> Any:
         if self._ocr is None:
@@ -81,10 +83,11 @@ class OcrEngine:
             )
         return self._ocr
 
-    def recognize(self, image_path: Path) -> list[OcrText]:
+    def recognize(self, image_path: Path, rectify_table: bool | None = None) -> list[OcrText]:
         processed = image_path.with_name(f"{image_path.stem}.ocr.png")
+        should_rectify = self.rectify_table if rectify_table is None else rectify_table
         try:
-            input_path = preprocess_image(image_path, processed, self.max_side)
+            input_path = preprocess_image(image_path, processed, self.max_side, should_rectify)
         except Exception:
             input_path = image_path
 

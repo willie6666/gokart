@@ -83,3 +83,19 @@ def test_missing_kart_number_becomes_unknown_column() -> None:
 
     assert [kart.kart_no for kart in parsed.karts] == [3, 8, None, 5]
     assert parsed.karts[2].best_lap == 21.26
+
+
+def test_infers_missing_first_kart_when_second_is_two() -> None:
+    items = [
+        item("Lp/Nr", 20, 100),
+        item("2", 200, 100),
+        item("19.42", 100, 150),
+        item("24.26", 200, 150),
+        item("19.57", 100, 170),
+        item("24.58", 200, 170),
+    ]
+
+    parsed = parse_lap_sheet(items)
+
+    assert [kart.kart_no for kart in parsed.karts] == [1, 2]
+    assert parsed.karts[0].best_lap == 19.42

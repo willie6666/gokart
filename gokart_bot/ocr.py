@@ -39,10 +39,10 @@ class OcrText:
 class OcrEngine:
     def __init__(
         self,
-        max_side: int = 2200,
-        det_limit_side_len: int = 2200,
-        det_model: str = "PP-OCRv5_mobile_det",
-        rec_model: str = "PP-OCRv5_mobile_rec",
+        max_side: int = 1400,
+        det_limit_side_len: int = 1400,
+        det_model: str = "PP-OCRv5_server_det",
+        rec_model: str = "PP-OCRv5_server_rec",
         cpu_threads: int = 1,
         rectify_table: bool = True,
     ) -> None:

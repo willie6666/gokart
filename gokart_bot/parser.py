@@ -164,6 +164,7 @@ def _parse_by_coordinates(items: list[OcrText]) -> list[KartResult]:
                 laps=laps,
             )
         )
+    _infer_missing_kart_numbers(results)
     return results
 
 
@@ -183,6 +184,11 @@ def _parse_by_text_order(items: list[OcrText]) -> list[KartResult]:
             if value not in kart_numbers:
                 kart_numbers.append(value)
     return [KartResult(kart_no=value, position=index + 1) for index, value in enumerate(kart_numbers)]
+
+
+def _infer_missing_kart_numbers(karts: list[KartResult]) -> None:
+    if len(karts) >= 2 and karts[0].kart_no is None and karts[0].position == 1 and karts[1].kart_no == 2:
+        karts[0].kart_no = 1
 
 
 @dataclass

@@ -4,7 +4,7 @@ from pathlib import Path
 from statistics import median
 
 
-DEFAULT_MAX_OCR_SIDE = 2200
+DEFAULT_MAX_OCR_SIDE = 1400
 
 
 def preprocess_image(source: Path, destination: Path, max_side: int = DEFAULT_MAX_OCR_SIDE, rectify_table: bool = True) -> Path:

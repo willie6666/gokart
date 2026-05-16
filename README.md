@@ -25,7 +25,7 @@ PaddleOCR 預設使用 `paddle_static` 推論引擎，因此必須安裝 `paddle
 
 Bot 會強制讓 PaddleOCR 使用 CPU 並關閉 MKLDNN/oneDNN，避免部分 Linux/Nix CPU 環境出現 Paddle Inference backend crash。
 
-預設 OCR 使用 `PP-OCRv5_mobile_det` + `PP-OCRv5_mobile_rec`，並把圖片長邊縮到 `2200px`，目標是降低 RAM、硬碟 I/O 與等待時間。如果機器資源仍不足，可以把 `GOKART_OCR_MAX_SIDE` 和 `GOKART_OCR_DET_LIMIT_SIDE_LEN` 降到 `1600` 或 `1200`；如果辨識率不夠，可以調高尺寸或改回 server 模型。
+預設 OCR 使用 `PP-OCRv5_server_det` + `PP-OCRv5_server_rec`，並把圖片長邊縮到 `1400px`，目標是在保留表格小字辨識率的同時降低 RAM、硬碟 I/O 與等待時間。如果機器資源仍不足，可以把 `GOKART_OCR_MAX_SIDE` 和 `GOKART_OCR_DET_LIMIT_SIDE_LEN` 降到 `1200`；如果辨識率不夠，可以調高到 `1600` 或 `2200`。
 
 `GOKART_OCR_RECTIFY_TABLE=true` 會先用 OpenCV 偵測表格線，裁出主表格並依水平線旋轉校正；如果校正後仍有未知車號，bot 會用未校正原圖做一次備援辨識，只補缺少的車號。
 
@@ -42,10 +42,10 @@ DISCORD_TOKEN=replace-with-your-bot-token
 GOKART_DATA_PATH=data/gokart_records.json
 GOKART_IMAGE_DIR=data/images
 GOKART_MIN_OCR_CONFIDENCE=0.50
-GOKART_OCR_MAX_SIDE=2200
-GOKART_OCR_DET_LIMIT_SIDE_LEN=2200
-GOKART_OCR_DET_MODEL=PP-OCRv5_mobile_det
-GOKART_OCR_REC_MODEL=PP-OCRv5_mobile_rec
+GOKART_OCR_MAX_SIDE=1400
+GOKART_OCR_DET_LIMIT_SIDE_LEN=1400
+GOKART_OCR_DET_MODEL=PP-OCRv5_server_det
+GOKART_OCR_REC_MODEL=PP-OCRv5_server_rec
 GOKART_OCR_CPU_THREADS=1
 GOKART_OCR_RECTIFY_TABLE=true
 ```

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 import io
 import logging
 from pathlib import Path
@@ -29,11 +31,16 @@ class GokartBot(commands.Bot):
         super().__init__(command_prefix="!gokart ", intents=intents)
         self.store = store
         self.image_dir = config.image_dir
+        self.ocr_executor = ThreadPoolExecutor(max_workers=config.ocr_workers, thread_name_prefix="gokart-ocr")
         self.ocr = OcrEngine(
             max_side=config.ocr_max_side,
             debug_ocr=config.debug_ocr,
             debug_dir=config.debug_dir,
         )
+
+    async def close(self) -> None:
+        self.ocr_executor.shutdown(wait=False, cancel_futures=True)
+        await super().close()
 
     async def setup_hook(self) -> None:
         for session in self.store.sessions_with_result_messages():
@@ -85,11 +92,10 @@ class GokartBot(commands.Bot):
 
         debug_channel_id = self.store.get_debug_channel_id()
         try:
-            parsed = await asyncio.to_thread(
-                self.ocr.recognize_lap_sheet,
-                image_path,
-                session_id,
-                force_debug=debug_channel_id is not None,
+            loop = asyncio.get_running_loop()
+            parsed = await loop.run_in_executor(
+                self.ocr_executor,
+                partial(self.ocr.recognize_lap_sheet, image_path, session_id, force_debug=debug_channel_id is not None),
             )
             raw_ocr = parsed.raw_debug_summary or {"mode": "grid"}
         except Exception as exc:

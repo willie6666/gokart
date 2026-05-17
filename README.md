@@ -1,17 +1,18 @@
 # Gokart Discord Bot
 
-這是一個用 Python 製作的卡丁車歷史紀錄 Discord bot。
+Discord bot for OCRing go-kart lap sheets and tracking claimed driver records.
 
-## 功能
+## Features
 
-- 指定一個紀錄圖片頻道，只有該頻道的圖片會自動 OCR。
-- Bot 會回覆辨識出的日期、時間、車號、最佳圈速與圈數。
-- 使用者可按車號按鈕認領自己的車。
-- 使用 JSON 檔保存紀錄，不需要資料庫。
-- 使用 `/fix` 手動修正辨識錯誤。
-- 使用 `/me`、`/leaderboard`、`/session`、`/laps` 查詢紀錄。
+- Watch one configured Discord channel for uploaded lap sheet images.
+- Use OpenCV to find, warp, and grid-slice the table.
+- Use EasyOCR-only OCR for headers, kart numbers, lap indexes, and lap times.
+- Store records in a local JSON file.
+- Let drivers claim their kart result from Discord buttons.
+- Show per-session results, full lap lists, personal records, and a claimed-driver leaderboard.
+- Optionally send debug artifacts to a configured debug channel.
 
-## 安裝
+## Install
 
 ```bash
 python -m venv .venv
@@ -19,86 +20,112 @@ python -m venv .venv
 pip install -e '.[dev]'
 ```
 
-PaddleOCR 第一次使用會下載模型，啟動與首次辨識會比較久。
+EasyOCR downloads its model files on first use, so the first OCR run is slower.
 
-PaddleOCR 預設使用 `paddle_static` 推論引擎，因此必須安裝 `paddlepaddle`。本專案已把它列入依賴；如果你是在更新後遇到 `dependency 'paddlepaddle' is not installed`，請重新執行 `pip install -e '.[dev]'`。
-
-Bot 會強制讓 PaddleOCR 使用 CPU 並關閉 MKLDNN/oneDNN，避免部分 Linux/Nix CPU 環境出現 Paddle Inference backend crash。
-
-預設 OCR 使用 grid 流程：OpenCV 先找主表格、做透視校正、偵測格線並切 cell，OCR 只讀每個 cell。舊的整張圖 OCR 仍保留為 fallback，可用 `GOKART_OCR_MODE=legacy` 切回。
-
-預設 PaddleOCR 使用 `PP-OCRv5_server_det` + `PP-OCRv5_server_rec`，並把圖片長邊縮到 `1600px`，目標是在保留表格小字辨識率的同時降低 RAM、硬碟 I/O 與等待時間。grid cell OCR 建議安裝 Tesseract；如果沒有 Tesseract，bot 會 fallback 到 legacy OCR，避免用 Paddle 逐格 OCR 造成 Discord gateway 斷線。
-
-`GOKART_OCR_RECTIFY_TABLE=true` 會先用 OpenCV 偵測表格線，裁出主表格並依水平線旋轉校正；如果校正後仍有未知車號，bot 會用未校正原圖做一次備援辨識，只補缺少的車號。
-
-## 設定
+## Configuration
 
 ```bash
 cp .env.example .env
 ```
 
-編輯 `.env`：
+Edit `.env`:
 
 ```env
 DISCORD_TOKEN=replace-with-your-bot-token
 GOKART_DATA_PATH=data/gokart_records.json
 GOKART_IMAGE_DIR=data/images
-GOKART_MIN_OCR_CONFIDENCE=0.50
-GOKART_OCR_MODE=grid
 GOKART_DEBUG_OCR=true
 GOKART_DEBUG_DIR=data/debug
 GOKART_OCR_MAX_SIDE=1600
-GOKART_OCR_DET_LIMIT_SIDE_LEN=1600
-GOKART_OCR_DET_MODEL=PP-OCRv5_server_det
-GOKART_OCR_REC_MODEL=PP-OCRv5_server_rec
-GOKART_OCR_CPU_THREADS=1
-GOKART_OCR_RECTIFY_TABLE=false
+GOKART_OCR_WORKERS=1
 ```
 
-`GOKART_DEBUG_OCR=true` 會為每次辨識輸出 `original.jpg`、`table_warped.png`、`grid_overlay.png`、`cell_ocr.json` 與 `parsed.json` 到 `data/debug/session-{id}/`。
+Settings:
 
-Discord Developer Portal 需要開啟 bot 的 `Message Content Intent`，否則 bot 無法監聽圖片訊息。
+- `DISCORD_TOKEN`: Discord bot token.
+- `GOKART_DATA_PATH`: JSON store path.
+- `GOKART_IMAGE_DIR`: saved upload image directory.
+- `GOKART_DEBUG_OCR`: write debug artifacts to `GOKART_DEBUG_DIR` when true.
+- `GOKART_DEBUG_DIR`: local debug artifact directory.
+- `GOKART_OCR_MAX_SIDE`: image resize max side before table detection.
+- `GOKART_OCR_WORKERS`: dedicated OCR thread pool size. Use `1` for lowest CPU contention; increase only if the host can handle multiple OCR jobs.
 
-## 執行
+Discord Developer Portal must enable `Message Content Intent`, otherwise the bot cannot see image messages.
+
+## OCR Pipeline
+
+The OCR path is grid-only:
+
+- OpenCV scans and warps the paper/table.
+- OpenCV detects grid lines and crops cells/columns.
+- EasyOCR recognizes all text.
+- Lap columns use OpenCV projection to split each row, then EasyOCR recognizes each row crop.
+- Virtual lap rows map OCR words back to lap numbers.
+
+EasyOCR Reader instances are cached per OCR worker thread. The bot uses a dedicated OCR executor so long-running image recognition does not run on the Discord event loop.
+
+## Run
 
 ```bash
 python -m gokart_bot
 ```
 
-也可以：
+## Usage
 
-```bash
-python bot.py
-```
-
-## 使用方式
-
-1. 先用 `/setrecordchannel` 設定紀錄圖片頻道。
-2. 在該頻道上傳 `example/` 類似的成績表照片。
-3. Bot 會回覆辨識結果。
-4. 使用者按下自己的車號按鈕認領。
-5. 如果辨識錯誤，用 `/fix` 修正。
+1. Use `/setrecordchannel` in Discord to set the image channel.
+2. Upload a lap sheet image to that channel.
+3. The bot replies with parsed results and claim buttons.
+4. Drivers claim their result with the button/dropdown UI.
+5. Use `/fix` if OCR needs manual correction.
 
 ## Slash Commands
 
-- `/me`：查詢自己的歷史紀錄。
-- `/leaderboard limit:10`：查詢排行榜，使用較整齊的表格格式。
-- `/session session_id:1`：查詢某場紀錄。
-- `/laps session_id:1`：查詢某場所有車號的完整圈速，內容太長會自動附上文字檔。
-- `/laps session_id:1 kart_no:12`：查詢某場特定車號的完整圈速。
-- `/fix session_id:1 kart_no:12 best_lap:19.65`：修正某車最佳圈速。
-- `/fix session_id:1 kart_no:12 laps:20.10,19.65,20.00`：用完整圈速修正某車紀錄。
-- `/fix session_id:1 position:3 kart_no:7`：把第 3 欄的 `車號未知` 改成車號 7，保留原本辨識出的圈速。
-- `/unclaim session_id:1`：取消自己在某場的認領。
-- `/recordchannel`：查看目前紀錄圖片頻道。
-- `/setrecordchannel channel:#records`：設定紀錄圖片頻道。需要管理伺服器權限。
-- `/clearrecordchannel`：清除紀錄圖片頻道設定，停止自動辨識圖片。需要管理伺服器權限。
-- `/sync`：重新同步 slash commands。
+- `/me`: show your claimed records.
+- `/profile user:@driver`: show another user's claimed records.
+- `/myrecords limit:5`: show your recent claimed records.
+- `/leaderboard limit:10`: show each claimed driver once, using their personal best lap.
+- `/session session_id:1`: show one parsed session.
+- `/heat heat_id:1`: alias-style session lookup by record id.
+- `/laps session_id:1`: show full lap times for a session.
+- `/laps session_id:1 kart_no:12`: show full lap times for one kart.
+- `/fix session_id:1 kart_no:12 best_lap:19.65`: correct a kart's best lap.
+- `/fix session_id:1 kart_no:12 laps:20.10,19.65,20.00`: replace a kart's full lap list.
+- `/fix session_id:1 position:3 kart_no:7`: set the kart number for an unknown column position.
+- `/unclaim session_id:1`: remove your claim for one session.
+- `/recordchannel`: show the current image channel.
+- `/setrecordchannel channel:#records`: set the image channel. Requires Manage Server.
+- `/clearrecordchannel`: clear the image channel. Requires Manage Server.
+- `/debugchannel`: show the current OCR debug channel.
+- `/setdebugchannel channel:#debug`: send selected debug artifacts to a channel. Requires Manage Server.
+- `/cleardebugchannel`: clear the OCR debug channel. Requires Manage Server.
+- `/ping`: health check.
 
-## JSON 資料
+## Debug Artifacts
 
-預設資料會存到 `data/gokart_records.json`。圖片會存到 `data/images/`。
+When `GOKART_DEBUG_OCR=true`, local debug files are written to `data/debug/session-{id}/`:
 
-## 注意
+- `original.jpg`
+- `paper_warped.png`
+- `table_warped.png`
+- `grid_overlay.png`
+- `virtual_rows_overlay.png`
+- `cell_ocr.json`
+- `ocr_words.json`
+- `parsed.json`
+- `column_crops/`
+- `cells/`
 
-OCR 目前使用座標式 heuristic parser，對範例格式最佳。若照片太歪、太糊、表格被遮住，請用 `/fix` 手動修正。
+If `/setdebugchannel` is configured, the bot uploads these artifacts after each OCR regardless of `GOKART_DEBUG_OCR`:
+
+- `grid_overlay.png`
+- `table_warped.png`
+- `virtual_rows_overlay.png`
+- `parsed.json`
+
+## Data
+
+Records are stored in `data/gokart_records.json` by default. Uploaded images are saved in `data/images/`.
+
+## Notes
+
+The parser is tuned for the lap sheet layout in `example/`. If a photo is too blurry, skewed, cropped, or uses a different table layout, use `/fix` to correct the stored record.

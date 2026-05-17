@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import re
+import threading
 
 import cv2
 import numpy as np
@@ -40,7 +41,7 @@ class CellOcrResult:
 
 class CellOcrEngine:
     def __init__(self) -> None:
-        self._easyocr = None
+        self._local = threading.local()
 
     def recognize_cell(self, image: np.ndarray, mode: str) -> tuple[str, float | None]:
         if mode == "integer":
@@ -160,11 +161,13 @@ class CellOcrEngine:
         return str(results[0][1]).strip(), float(results[0][2])
 
     def _get_easyocr(self):
-        if self._easyocr is None:
+        reader = getattr(self._local, "easyocr_reader", None)
+        if reader is None:
             import easyocr
 
-            self._easyocr = easyocr.Reader(["en"], gpu=False)
-        return self._easyocr
+            reader = easyocr.Reader(["en"], gpu=False)
+            self._local.easyocr_reader = reader
+        return reader
 
     def _recognize_grid(self, grid: TableGrid, debug_dir: Path | None = None) -> dict[tuple[int, int], CellOcrResult]:
         cells_dir = debug_dir / "cells" if debug_dir else None

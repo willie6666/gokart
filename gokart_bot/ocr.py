@@ -22,13 +22,14 @@ class OcrEngine:
         self.max_side = max_side
         self.debug_ocr = debug_ocr
         self.debug_dir = Path(debug_dir)
+        self.cell_engine = CellOcrEngine()
 
     def recognize_lap_sheet(self, image_path: Path, session_id: str | None = None, force_debug: bool = False) -> ParsedSheet:
         debug_dir = self.debug_dir_for_session(session_id) if force_debug else self._debug_dir(session_id)
         grid = extract_table_grid(image_path, debug_dir, self.max_side)
         if grid.row_count < 10 or grid.col_count < 6:
             raise RuntimeError("Grid detection failed; not enough table rows or columns")
-        cell_engine = CellOcrEngine()
+        cell_engine = self.cell_engine
         header_cells = cell_engine.recognize_header_cells(grid, debug_dir)
         _add_full_top_header_cell(grid, header_cells, cell_engine)
         lap_cell = _find_lap_cell(grid, header_cells)

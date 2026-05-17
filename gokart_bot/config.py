@@ -13,6 +13,7 @@ class Config:
     data_path: Path
     image_dir: Path
     ocr_max_side: int
+    ocr_workers: int
     debug_ocr: bool
     debug_dir: Path
 
@@ -29,6 +30,7 @@ def load_config() -> Config:
         data_path=Path(os.environ.get("GOKART_DATA_PATH", "data/gokart_records.json")),
         image_dir=Path(os.environ.get("GOKART_IMAGE_DIR", "data/images")),
         ocr_max_side=int(os.environ.get("GOKART_OCR_MAX_SIDE", "1600")),
+        ocr_workers=max(1, int(os.environ.get("GOKART_OCR_WORKERS", "1"))),
         debug_ocr=os.environ.get("GOKART_DEBUG_OCR", "true").strip().lower() not in {"0", "false", "no"},
         debug_dir=Path(os.environ.get("GOKART_DEBUG_DIR", "data/debug")),
     )

@@ -164,6 +164,12 @@ def _normalize_lap_text(text: str) -> str:
     text = text.replace("I", "1").replace("l", "1").replace("|", "1")
     text = text.replace(",", ".").replace(":", ".")
     text = re.sub(r"[^0-9.]", "", text)
+    if not re.fullmatch(r"\d{1,2}\.\d{2,3}", text):
+        digits = re.sub(r"[^0-9]", "", text)
+        if re.fullmatch(r"\d{4}", digits):
+            return f"{digits[:2]}.{digits[2:]}"
+        if re.fullmatch(r"\d{5}", digits):
+            return f"{digits[:2]}.{digits[2:]}"
     if re.fullmatch(r"\d{4}", text):
         return f"{text[:2]}.{text[2:]}"
     if re.fullmatch(r"\d{5}", text):

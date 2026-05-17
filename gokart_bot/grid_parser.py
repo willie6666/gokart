@@ -137,7 +137,7 @@ def looks_like_lap_nr(text: str) -> bool:
 
 def looks_like_avg(text: str) -> bool:
     normalized = re.sub(r"[^a-z]", "", text.lower())
-    return normalized in {"avg", "ava", "av"}
+    return normalized in {"avg", "ava", "av", "avq", "havq"}
 
 
 def _parse_header(sheet: ParsedSheet, grid: TableGrid, cells: dict[tuple[int, int], CellOcrResult]) -> None:

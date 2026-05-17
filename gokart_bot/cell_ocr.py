@@ -119,11 +119,13 @@ class CellOcrEngine:
                 continue
             raw_text = _postprocess_easyocr_text(str(rec[0][1]).strip(), mode)
             confidence = float(rec[0][2])
+            if mode == "lap_time" and re.match(r"\d{3,}[.,:]", raw_text):
+                raw_text = _lap_time_suffix_candidate(raw_text) or raw_text
             if mode == "lap_time" and not looks_like_lap_candidate(raw_text):
-                if len(raw_text) > 4 and raw_text[0] == "1" and looks_like_lap_candidate(raw_text[1:]):
-                    raw_text = raw_text[1:]
-                else:
+                cleaned = _lap_time_suffix_candidate(raw_text)
+                if cleaned is None:
                     continue
+                raw_text = cleaned
             if mode == "lap_index" and not _looks_like_lap_index(raw_text):
                 continue
             words.append(
@@ -204,6 +206,12 @@ def normalize_lap_text(text: str) -> str:
     text = text.replace("I", "1").replace("l", "1").replace("|", "1")
     text = text.replace(",", ".").replace(":", ".")
     text = re.sub(r"[^0-9.]", "", text)
+    if not re.fullmatch(r"\d{1,2}\.\d{2,3}", text):
+        digits = re.sub(r"[^0-9]", "", text)
+        if re.fullmatch(r"\d{4}", digits):
+            return f"{digits[:2]}.{digits[2:]}"
+        if re.fullmatch(r"\d{5}", digits):
+            return f"{digits[:2]}.{digits[2:]}"
     if re.fullmatch(r"\d{4}", text):
         text = f"{text[:2]}.{text[2:]}"
     elif re.fullmatch(r"\d{5}", text):
@@ -330,6 +338,15 @@ def _postprocess_easyocr_text(text: str, mode: str) -> str:
     if mode == "lap_time":
         return re.sub(r"[^0-9.,:]", "", text)
     return re.sub(r"[^0-9A-Za-z/:. ]", "", text)
+
+
+def _lap_time_suffix_candidate(text: str) -> str | None:
+    for start in range(1, min(3, len(text)) + 1):
+        candidate = text[start:]
+        if looks_like_lap_candidate(candidate):
+            return candidate
+    normalized = normalize_lap_text(text)
+    return normalized if looks_like_lap_candidate(normalized) else None
 
 
 def _normalize_text(text: str) -> str:

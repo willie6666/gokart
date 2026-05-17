@@ -4,7 +4,7 @@ import numpy as np
 import re
 from pprint import pp
 
-path = "/home/willie/storage/python312/gokart/data/debug/session-71/column_crops/col01.png"
+path = "/home/willie/storage/python312/gokart/data/debug/session-77/column_crops/col01.png"
 
 img = cv2.imread(path)
 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)

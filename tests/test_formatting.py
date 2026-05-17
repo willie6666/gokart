@@ -56,7 +56,7 @@ def test_leaderboard_uses_each_claimed_driver_best_once() -> None:
 
     output = format_leaderboard([first, second])
 
-    assert "1. 19.65s｜driver(<@99>)｜2026/5/16 04:18:42" in output
+    assert "1. 19.65s｜<@99>｜2026/5/16 04:18:42" in output
     assert "20.00s" not in output
     assert "18.50s" not in output
     assert "Heat 12" not in output
@@ -71,6 +71,19 @@ def test_profile_display_includes_mvp_stats() -> None:
     assert "總圈數：2" in output
     assert "個人最佳：19.65s" in output
     assert "平均圈速：20.24s" in output
+
+
+def test_profile_display_handles_claim_without_best_lap() -> None:
+    record = session()
+    kart = record.find_kart(12)
+    kart.claimed_by_user_id = 99
+    kart.best_lap = None
+    kart.laps = []
+
+    output = format_user_records(99, [record])
+
+    assert "總場次：1" in output
+    assert "個人最佳：未知" in output
 
 
 def test_myrecords_display_recent_claims() -> None:

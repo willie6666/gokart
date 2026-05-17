@@ -92,7 +92,10 @@ def format_user_records(user_id: int, sessions: list[SessionRecord], display_nam
     lines.append(f"總場次：{len(claimed)}")
     if total_laps:
         lines.append(f"總圈數：{total_laps}")
-    lines.append(f"個人最佳：{best_kart.best_lap:.2f}s，車號 {best_kart.kart_no}，紀錄 #{best_session.id}")
+    if best_kart.best_lap is not None:
+        lines.append(f"個人最佳：{best_kart.best_lap:.2f}s，車號 {best_kart.kart_no}，紀錄 #{best_session.id}")
+    else:
+        lines.append("個人最佳：未知")
     if lap_values:
         lines.append(f"平均圈速：{sum(lap_values) / len(lap_values):.2f}s")
     lines.append("")
@@ -169,4 +172,3 @@ def _driver_label(kart: KartResult) -> str:
 def _format_lap_table(laps: list[float]) -> str:
     rows = [f"{lap:.2f}s" for lap in laps]
     return "```text\n" + "\n".join(rows) + "\n```"
-

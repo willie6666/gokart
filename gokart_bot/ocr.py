@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
 from pathlib import Path
 
-from .cell_ocr import CellOcrEngine
+import cv2
+
+from .cell_ocr import CellOcrEngine, preprocess_image
 from .grid_parser import parse_grid_sheet, parse_grid_sheet_with_virtual_rows
 from .lap_row_detector import detect_virtual_lap_rows
 from .ocr_debug import write_cell_ocr, write_debug_parsed, write_parsed_overlay, write_tesseract_words, write_virtual_rows_overlay
@@ -45,9 +45,15 @@ class OcrEngine:
         y_start = lap_box.y + lap_box.h if lap_box else grid.y_lines[min(lap_row + 1, len(grid.y_lines) - 1)]
         y_end = _find_avg_y(grid, header_cells, lap_row + 1)
         column_words = {}
+        crops_dir = debug_dir / "column_crops" if debug_dir else None
+        if crops_dir:
+            crops_dir.mkdir(parents=True, exist_ok=True)
         for col in range(lap_col, grid.col_count):
             region = crop_column_region(grid, col, y_start=y_start, y_end=int(y_end) if y_end else None)
             mode = "lap_index" if col == lap_col else "lap_time"
+            if crops_dir:
+                label = "lap_index" if col == lap_col else f"col{col:02d}"
+                cv2.imwrite(str(crops_dir / f"{label}.png"), preprocess_image(region.image, mode))
             words = cell_engine.recognize_column_words(region.image, mode=mode)
             translated = [
                 type(word)(word.text, word.confidence, word.x + region.x_offset, word.y + region.y_offset, word.w, word.h)

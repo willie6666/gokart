@@ -30,10 +30,10 @@ class TableGrid:
     warnings: list[str] = field(default_factory=list)
 
     def cell(self, row: int, col: int) -> CellBox | None:
-        for cell in self.cells:
-            if cell.row == row and cell.col == col:
-                return cell
-        return None
+        if row < 0 or col < 0 or row >= self.row_count or col >= self.col_count:
+            return None
+        index = row * self.col_count + col
+        return self.cells[index] if index < len(self.cells) else None
 
 
 def extract_table_grid(image_path: Path, debug_dir: Path | None = None, max_side: int = 2200) -> TableGrid:
@@ -293,6 +293,14 @@ def build_cells(x_lines: list[int], y_lines: list[int]) -> list[CellBox]:
     return cells
 
 
+def crop_column_region(grid: TableGrid, col: int, y_start: int, y_end: int | None = None, pad_x: int = 2):
+    x1 = max(0, grid.x_lines[col] + pad_x)
+    x2 = min(grid.image.shape[1], grid.x_lines[col + 1] - pad_x)
+    y1 = max(0, y_start)
+    y2 = min(grid.image.shape[0], y_end if y_end is not None else grid.image.shape[0])
+    return grid.image[y1:y2, x1:x2]
+
+
 def _with_edges(lines: list[int], max_value: int) -> list[int]:
     lines = [value for value in lines if 0 <= value <= max_value - 1]
     if not lines or lines[0] > max_value * 0.04:
@@ -310,12 +318,6 @@ def _merge_until_count(lines: list[int], max_count: int) -> list[int]:
         merged = int(round((lines[index] + lines[index + 1]) / 2))
         lines[index : index + 2] = [merged]
     return lines
-
-
-def _regular_lines(max_value: int, count: int) -> list[int]:
-    if count < 1:
-        return [0, max_value - 1]
-    return [int(round(value)) for value in np.linspace(0, max_value - 1, count + 1)]
 
 
 def _write_grid_overlay(grid: TableGrid, path: Path) -> None:

@@ -6,6 +6,7 @@ from pathlib import Path
 import cv2
 
 from .cell_ocr import CellOcrResult
+from .lap_row_detector import TesseractWord, VirtualLapRow, find_virtual_row
 from .parser import ParsedSheet
 from .table_grid import TableGrid
 
@@ -61,6 +62,58 @@ def write_parsed_overlay(grid: TableGrid, parsed: ParsedSheet, debug_dir: Path |
             cv2.rectangle(image, (cell.x, cell.y), (cell.x + cell.w, cell.y + cell.h), (0, 0, 255), 3)
             cv2.putText(image, "Lap/Nr", (cell.x + 4, cell.y + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
     cv2.imwrite(str(debug_dir / "grid_overlay.png"), image)
+
+
+def write_tesseract_words(
+    column_words: dict[int, list[TesseractWord]],
+    rows: list[VirtualLapRow],
+    debug_dir: Path | None,
+) -> None:
+    if debug_dir is None:
+        return
+    payload = []
+    for col, words in sorted(column_words.items()):
+        for word in words:
+            payload.append(
+                {
+                    "col": col,
+                    "virtual_row": find_virtual_row(rows, word.center_y),
+                    "text": word.text,
+                    "confidence": word.confidence,
+                    "x": round(word.x, 2),
+                    "y": round(word.y, 2),
+                    "w": round(word.w, 2),
+                    "h": round(word.h, 2),
+                }
+            )
+    with (debug_dir / "tesseract_words.json").open("w", encoding="utf-8") as file:
+        json.dump(payload, file, ensure_ascii=False, indent=2)
+        file.write("\n")
+
+
+def write_virtual_rows_overlay(
+    grid: TableGrid,
+    column_words: dict[int, list[TesseractWord]],
+    rows: list[VirtualLapRow],
+    debug_dir: Path | None,
+) -> None:
+    if debug_dir is None:
+        return
+    image = grid.image.copy()
+    for x in grid.x_lines:
+        cv2.line(image, (x, 0), (x, image.shape[0] - 1), (0, 255, 0), 1)
+    for row in rows:
+        y = int(round(row.center_y))
+        cv2.line(image, (0, y), (image.shape[1] - 1, y), (255, 0, 255), 1)
+        cv2.putText(image, str(row.index), (4, y - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 255), 1)
+    for col, words in column_words.items():
+        for word in words:
+            row_index = find_virtual_row(rows, word.center_y)
+            x1, y1 = int(round(word.x)), int(round(word.y))
+            x2, y2 = int(round(word.x + word.w)), int(round(word.y + word.h))
+            cv2.rectangle(image, (x1, y1), (x2, y2), (0, 128, 255), 1)
+            cv2.putText(image, f"c{col}/r{row_index or '?'}", (x1, max(10, y1 - 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 128, 255), 1)
+    cv2.imwrite(str(debug_dir / "virtual_rows_overlay.png"), image)
 
 
 def _draw_row(image, grid: TableGrid, row: int, color: tuple[int, int, int], label: str) -> None:

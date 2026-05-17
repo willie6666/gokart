@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import discord
 
-from .formatting import format_session
+from .formatting import format_kart_laps, format_session
 from .storage import JsonStore
 
 
@@ -20,6 +20,8 @@ class ClaimView(discord.ui.View):
             button = ClaimButton(session_id, kart.position, kart.kart_no, disabled=disabled, claimed_by_name=kart.claimed_by_name)
             button.row = index // 5
             self.add_item(button)
+        if claimable:
+            self.add_item(KartLapsSelect(session_id, claimable[:25]))
 
 
 class ClaimButton(discord.ui.Button[ClaimView]):
@@ -53,3 +55,41 @@ class ClaimButton(discord.ui.Button[ClaimView]):
             f"{interaction.user.mention} 已認領紀錄 #{self.session_id} 的{label}。\n本次最佳圈速：{best}",
             ephemeral=True,
         )
+
+
+class KartLapsSelect(discord.ui.Select[ClaimView]):
+    def __init__(self, session_id: str, karts) -> None:
+        options = []
+        for kart in karts:
+            label = f"車號 {kart.kart_no}" if kart.kart_no is not None else f"欄位 {kart.position}"
+            best = f"最佳 {kart.best_lap:.2f}s" if kart.best_lap is not None else "最佳未知"
+            laps = f"{len(kart.laps)} 圈" if kart.laps else "圈數未知"
+            options.append(
+                discord.SelectOption(
+                    label=label,
+                    value=str(kart.position),
+                    description=f"{best}，{laps}",
+                )
+            )
+        super().__init__(
+            placeholder="選取車號查看完整圈速",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id=f"gokart:laps:{session_id}",
+            row=4,
+        )
+        self.session_id = session_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        assert self.view is not None
+        session = self.view.store.get_session(self.session_id)
+        if session is None:
+            await interaction.response.send_message(f"找不到紀錄 #{self.session_id}", ephemeral=True)
+            return
+        position = int(self.values[0])
+        kart = next((candidate for candidate in session.karts if candidate.position == position), None)
+        if kart is None:
+            await interaction.response.send_message(f"找不到欄位 {position}", ephemeral=True)
+            return
+        await interaction.response.send_message(format_kart_laps(session, kart), ephemeral=True)

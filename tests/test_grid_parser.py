@@ -97,3 +97,19 @@ def test_parse_grid_sheet_extracts_multiple_laps_from_merged_cell() -> None:
 
     assert parsed.karts[0].best_lap == 22.17
     assert parsed.karts[0].laps == [24.63, 22.17, 24.01, 23.67, 26.03]
+
+
+def test_first_kart_eleven_before_two_is_corrected_to_one() -> None:
+    cells = {
+        (2, 1): cell(2, 1, "Lap/Nr"),
+        (2, 2): cell(2, 2, "11"),
+        (2, 3): cell(2, 3, "2"),
+        (3, 2): cell(3, 2, "19.43"),
+        (4, 2): cell(4, 2, "19.65"),
+        (3, 3): cell(3, 3, "25.66"),
+        (4, 3): cell(4, 3, "24.56"),
+    }
+
+    parsed = parse_grid_sheet(grid(), cells)
+
+    assert [kart.kart_no for kart in parsed.karts] == [1, 2]

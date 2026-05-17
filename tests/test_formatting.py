@@ -32,8 +32,9 @@ def test_session_display_uses_date_time_without_heat() -> None:
 def test_laps_display_includes_all_laps() -> None:
     output = format_laps(session(), 12)
 
-    assert "01:20.84s" in output
-    assert "02:19.65s" in output
+    assert "20.84s" in output
+    assert "19.65s" in output
+    assert "01:20.84s" not in output
 
 
 def test_leaderboard_is_table_like_and_hides_heat() -> None:

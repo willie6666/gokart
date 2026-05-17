@@ -14,6 +14,7 @@ DATE_RE = re.compile(r"(?:Date\s*[:：]?\s*)?(20\d{2}\s*/\s*\d{1,2}\s*/\s*\d{1,2
 COMPACT_DATE_RE = re.compile(r"Date\s*[:：]?\s*(20\d{2})\s*/\s*(\d{2,4})", re.IGNORECASE)
 HEAT_RE = re.compile(r"Heat\s*[:：]?\s*(?:Heat\s*)?(\d+)", re.IGNORECASE)
 TIME_RE = re.compile(r"(?:Time|Printed)\s*[:：]?\s*(?:上午|下午|AM|PM)?\s*(\d{1,2}:\d{2}(?::\d{2})?)", re.IGNORECASE)
+LOOSE_TIME_RE = re.compile(r"(?:Time|Printed).{0,30}?(\d{1,2}:\d{2})(?:\s+(\d{2}))?", re.IGNORECASE)
 FLOAT_RE = re.compile(r"^(?:0:)?\d{1,2}[\.,:]\d{2,3}$")
 INT_RE = re.compile(r"^\d{1,3}$")
 
@@ -77,13 +78,21 @@ def _find_date(text: str) -> str | None:
     if len(tail) == 3:
         return f"{year}/{tail[0]}/{tail[1:]}"
     if len(tail) == 4:
+        if int(tail[:2]) > 12 and tail[1] == "1":
+            return f"{year}/{tail[0]}/{tail[2:]}"
         return f"{year}/{tail[:2]}/{tail[2:]}"
     return None
 
 
 def _find_time(text: str) -> str | None:
     match = TIME_RE.search(text)
-    return match.group(1) if match else None
+    if match:
+        return match.group(1)
+    match = LOOSE_TIME_RE.search(text)
+    if not match:
+        return None
+    value, seconds = match.groups()
+    return f"{value}:{seconds}" if seconds else value
 
 
 def _find_heat(text: str) -> str | None:

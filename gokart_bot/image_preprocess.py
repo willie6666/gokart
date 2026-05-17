@@ -180,10 +180,3 @@ def _estimate_horizontal_angle(image) -> float:
 def _resize_for_ocr(image, max_side: int):
     return resize_max_side(image, max_side)
 
-
-def image_size(path: Path) -> tuple[int, int]:
-    image = cv2.imread(str(path))
-    if image is None:
-        raise ValueError(f"Cannot read image: {path}")
-    height, width = image.shape[:2]
-    return width, height

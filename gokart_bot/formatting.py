@@ -61,6 +61,17 @@ def format_laps(session: SessionRecord, kart_no: int | None = None) -> str:
     return "\n".join(lines)
 
 
+def format_kart_laps(session: SessionRecord, kart: KartResult) -> str:
+    heading = _session_label(session)
+    lines = [f"完整圈速 | 紀錄 #{session.id} | {heading}", ""]
+    lines.append(format_kart_line(kart))
+    if not kart.laps:
+        lines.append("沒有完整圈速資料。")
+        return "\n".join(lines)
+    lines.append(_format_lap_table(kart.laps))
+    return "\n".join(lines)
+
+
 def format_user_records(user_id: int, sessions: list[SessionRecord], display_name: str | None = None) -> str:
     claimed: list[tuple[SessionRecord, KartResult]] = []
     for session in sessions:
@@ -154,11 +165,8 @@ def _session_label(session: SessionRecord) -> str:
 
 
 def _format_lap_table(laps: list[float]) -> str:
-    rows = [f"{index + 1:02d}:{lap:05.2f}s" for index, lap in enumerate(laps)]
-    lines = []
-    for index in range(0, len(rows), 4):
-        lines.append("  ".join(rows[index : index + 4]))
-    return "```text\n" + "\n".join(lines) + "\n```"
+    rows = [f"{lap:.2f}s" for lap in laps]
+    return "```text\n" + "\n".join(rows) + "\n```"
 
 
 def _clip(value: str, length: int) -> str:

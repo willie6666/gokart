@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
 import re
 from pathlib import Path
-from typing import Any
 
 import cv2
 import numpy as np
 
 from .image_preprocess import make_ocr_image
+from .lap_row_detector import TesseractWord, looks_like_lap_candidate
 from .table_grid import TableGrid
 
 
@@ -32,44 +31,84 @@ class CellOcrResult:
 
 
 class CellOcrEngine:
-    def __init__(self, paddle_ocr=None) -> None:
-        self.paddle_ocr = paddle_ocr
+    def __init__(self) -> None:
         self.has_tesseract = _has_tesseract()
 
     def recognize_cell(self, image: np.ndarray, mode: str) -> tuple[str, float | None]:
         ocr_image = make_ocr_image(image)
         height, width = ocr_image.shape[:2]
-        max_side = max(width, height)
-        if max_side > 320:
-            scale = 320 / max_side
-            ocr_image = cv2.resize(ocr_image, (max(1, int(width * scale)), max(1, int(height * scale))), interpolation=cv2.INTER_AREA)
+        if height < 48:
+            scale = 48 / max(height, 1)
+            ocr_image = cv2.resize(ocr_image, (max(1, int(width * scale)), 48), interpolation=cv2.INTER_CUBIC)
         tesseract = _try_tesseract(ocr_image, mode) if self.has_tesseract else None
         if tesseract is not None:
             return tesseract, None
-        if self.paddle_ocr is None:
-            return "", None
-        paddle_image = cv2.cvtColor(ocr_image, cv2.COLOR_GRAY2BGR) if ocr_image.ndim == 2 else ocr_image
-        paddle_image = _pad_for_paddle_detector(paddle_image)
-        result = self.paddle_ocr.predict(paddle_image)
-        texts: list[str] = []
-        scores: list[float] = []
-        for page in result or []:
-            payload = page.json if hasattr(page, "json") else page
-            if isinstance(payload, dict) and "res" in payload:
-                payload = payload["res"]
-            if isinstance(payload, dict):
-                texts.extend(str(text) for text in payload.get("rec_texts", []) if text is not None)
-                scores.extend(float(score) for score in payload.get("rec_scores", []) if score is not None)
-        return " ".join(texts).strip(), round(sum(scores) / len(scores), 3) if scores else None
+        return "", None
 
-    def recognize_grid(self, grid: TableGrid, debug_dir: Path | None = None) -> dict[tuple[int, int], CellOcrResult]:
-        if self.paddle_ocr is not None:
-            paddle_results = self._recognize_grid_with_paddle_table(grid, debug_dir)
-            if self.has_tesseract:
-                return _merge_tesseract_headers_with_paddle_laps(self._recognize_grid_with_tesseract(grid, debug_dir), paddle_results)
-            return paddle_results
-
+    def recognize_header_cells(self, grid: TableGrid, debug_dir: Path | None = None) -> dict[tuple[int, int], CellOcrResult]:
         return self._recognize_grid_with_tesseract(grid, debug_dir)
+
+    def recognize_text_region(self, image: np.ndarray) -> str:
+        if not self.has_tesseract:
+            return ""
+        try:
+            import pytesseract
+        except ModuleNotFoundError:
+            return ""
+        variants = make_tesseract_variants(upscale_header_for_tesseract(image))
+        outputs: list[str] = []
+        for variant in variants:
+            for config in ("--oem 1 --psm 6", "--oem 1 --psm 11", "--oem 1 --psm 7"):
+                try:
+                    text = pytesseract.image_to_string(variant, config=config).strip()
+                except Exception:
+                    continue
+                if text:
+                    outputs.append(" ".join(text.split()))
+        return max(outputs, key=len) if outputs else ""
+
+    def recognize_integer_candidates(self, image: np.ndarray) -> list[str]:
+        if not self.has_tesseract:
+            return []
+        try:
+            import pytesseract
+        except ModuleNotFoundError:
+            return []
+        candidates: list[str] = []
+        variants = make_tesseract_variants(upscale_header_for_tesseract(image, target_height=180, max_aspect_ratio=4.0))
+        for variant in variants:
+            for config in (
+                "--oem 1 --psm 7 -c tessedit_char_whitelist=0123456789",
+                "--oem 1 --psm 8 -c tessedit_char_whitelist=0123456789",
+                "--oem 1 --psm 10 -c tessedit_char_whitelist=0123456789",
+                "--oem 1 --psm 13 -c tessedit_char_whitelist=0123456789",
+            ):
+                try:
+                    text = pytesseract.image_to_string(variant, config=config).strip()
+                except Exception:
+                    continue
+                digits = re.sub(r"[^0-9]", "", text)
+                if digits:
+                    candidates.append(digits)
+        return candidates
+
+    def recognize_column_words(self, image: np.ndarray, mode: str = "lap_time") -> list[TesseractWord]:
+        if not self.has_tesseract:
+            raise RuntimeError("Tesseract is required for virtual-row column OCR")
+        words: list[TesseractWord] = []
+        ocr_image, scale = upscale_for_tesseract(image)
+        for variant in make_tesseract_variants(ocr_image):
+            words.extend(_scale_words(_tesseract_data_words(variant, mode), 1 / scale))
+
+        deduped: dict[tuple[str, int, int], TesseractWord] = {}
+        for word in words:
+            if mode == "lap_time" and not looks_like_lap_candidate(word.text):
+                continue
+            key = (normalize_lap_text(word.text) if mode == "lap_time" else word.text.strip(), round(word.center_x / 4), round(word.center_y / 4))
+            current = deduped.get(key)
+            if current is None or (word.confidence or 0) > (current.confidence or 0):
+                deduped[key] = word
+        return sorted(deduped.values(), key=lambda item: (item.center_y, item.center_x))
 
     def _recognize_grid_with_tesseract(self, grid: TableGrid, debug_dir: Path | None = None) -> dict[tuple[int, int], CellOcrResult]:
         cells_dir = debug_dir / "cells" if debug_dir else None
@@ -88,39 +127,6 @@ class CellOcrEngine:
             results[(cell.row, cell.col)] = CellOcrResult(cell.row, cell.col, raw, normalized, confidence)
             if cells_dir:
                 cv2.imwrite(str(cells_dir / f"r{cell.row:02d}_c{cell.col:02d}.png"), crop)
-        return results
-
-    def _recognize_grid_with_paddle_table(
-        self, grid: TableGrid, debug_dir: Path | None = None
-    ) -> dict[tuple[int, int], CellOcrResult]:
-        image = grid.image
-        max_side = max(image.shape[:2])
-        if max_side > 1800:
-            scale = 1800 / max_side
-            image = cv2.resize(image, (int(image.shape[1] * scale), int(image.shape[0] * scale)), interpolation=cv2.INTER_AREA)
-        else:
-            scale = 1.0
-
-        result = self.paddle_ocr.predict(image)
-        items = _paddle_items(result)
-        if debug_dir:
-            _write_paddle_items(items, debug_dir)
-        grouped: dict[tuple[int, int], list[tuple[str, float | None, float]]] = {}
-        for text, confidence, x, y in items:
-            row_col = _cell_at(grid, x / scale, y / scale)
-            if row_col is None:
-                continue
-            grouped.setdefault(row_col, []).append((text, confidence, x))
-
-        results: dict[tuple[int, int], CellOcrResult] = {}
-        for cell in grid.cells:
-            values = sorted(grouped.get((cell.row, cell.col), []), key=lambda item: item[2])
-            raw = " ".join(value[0] for value in values).strip()
-            scores = [value[1] for value in values if value[1] is not None]
-            confidence = round(sum(scores) / len(scores), 3) if scores else None
-            mode = _mode_for_cell(cell.row, cell.col)
-            normalized = normalize_lap_text(raw) if mode == "lap_time" else _normalize_text(raw)
-            results[(cell.row, cell.col)] = CellOcrResult(cell.row, cell.col, raw, normalized, confidence)
         return results
 
 
@@ -166,19 +172,107 @@ def _try_tesseract(image: np.ndarray, mode: str) -> str | None:
         import pytesseract
     except ModuleNotFoundError:
         return None
-
     whitelist = {
         "integer": "0123456789",
         "lap_time": "0123456789.,:Il|Oo",
         "text": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/:. ",
     }.get(mode, "")
-    config = "--psm 7"
+    config = "--oem 1 --psm 7"
     if whitelist:
         config += f" -c tessedit_char_whitelist={whitelist}"
     try:
         return pytesseract.image_to_string(image, config=config).strip()
     except Exception:
         return None
+
+
+def upscale_for_tesseract(image: np.ndarray) -> tuple[np.ndarray, float]:
+    height, width = image.shape[:2]
+    if height < 900:
+        scale = 900 / max(height, 1)
+        return cv2.resize(image, (max(1, int(width * scale)), 900), interpolation=cv2.INTER_CUBIC), scale
+    return image, 1.0
+
+
+def upscale_header_for_tesseract(image: np.ndarray, target_height: int = 260, max_aspect_ratio: float = 8.0) -> np.ndarray:
+    height, width = image.shape[:2]
+    if height <= 0:
+        return image
+    scale = max(target_height / height, 1.0)
+    resized = cv2.resize(image, (max(1, int(width * scale)), max(1, int(height * scale))), interpolation=cv2.INTER_CUBIC)
+    resized_height, resized_width = resized.shape[:2]
+    target_padded_height = max(resized_height, int(resized_width / max_aspect_ratio))
+    if target_padded_height <= resized_height:
+        return resized
+    pad_total = target_padded_height - resized_height
+    pad_top = pad_total // 2
+    pad_bottom = pad_total - pad_top
+    return cv2.copyMakeBorder(resized, pad_top, pad_bottom, 0, 0, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+
+
+def _scale_words(words: list[TesseractWord], scale: float) -> list[TesseractWord]:
+    if scale == 1.0:
+        return words
+    return [
+        TesseractWord(
+            text=word.text,
+            confidence=word.confidence,
+            x=word.x * scale,
+            y=word.y * scale,
+            w=word.w * scale,
+            h=word.h * scale,
+        )
+        for word in words
+    ]
+
+
+def make_tesseract_variants(image: np.ndarray) -> list[np.ndarray]:
+    base = make_ocr_image(image)
+    _, otsu = cv2.threshold(base, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+    adaptive = cv2.adaptiveThreshold(base, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 8)
+    return [base, otsu, adaptive]
+
+
+def _tesseract_data_words(image: np.ndarray, mode: str) -> list[TesseractWord]:
+    try:
+        import pytesseract
+        from pytesseract import Output
+    except ModuleNotFoundError:
+        return []
+    whitelist = {
+        "integer": "0123456789",
+        "lap_time": "0123456789.,:Il|Oo",
+        "text": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/:. ",
+    }.get(mode, "")
+    configs = ["--oem 1 --psm 6", "--oem 1 --psm 11"] if mode == "lap_time" else ["--oem 1 --psm 7"]
+    if whitelist:
+        configs = [f"{config} -c tessedit_char_whitelist={whitelist}" for config in configs]
+    words: list[TesseractWord] = []
+    for config in configs:
+        try:
+            data = pytesseract.image_to_data(image, config=config, output_type=Output.DICT)
+        except Exception:
+            continue
+        for index, text in enumerate(data.get("text", [])):
+            text = str(text).strip()
+            if not text:
+                continue
+            try:
+                confidence_value = float(data["conf"][index])
+            except (ValueError, TypeError):
+                confidence_value = -1.0
+            confidence = confidence_value if confidence_value >= 0 else None
+            words.append(
+                TesseractWord(
+                    text=text,
+                    confidence=confidence,
+                    x=float(data["left"][index]),
+                    y=float(data["top"][index]),
+                    w=float(data["width"][index]),
+                    h=float(data["height"][index]),
+                )
+            )
+    return words
 
 
 def _has_tesseract() -> bool:
@@ -189,95 +283,6 @@ def _has_tesseract() -> bool:
     except Exception:
         return False
     return True
-
-
-def _pad_for_paddle_detector(image: np.ndarray, max_aspect_ratio: float = 2.5) -> np.ndarray:
-    height, width = image.shape[:2]
-    if height <= 0 or width / height <= max_aspect_ratio:
-        return image
-    target_height = int(round(width / max_aspect_ratio))
-    pad_total = max(0, target_height - height)
-    pad_top = pad_total // 2
-    pad_bottom = pad_total - pad_top
-    return cv2.copyMakeBorder(image, pad_top, pad_bottom, 0, 0, cv2.BORDER_CONSTANT, value=(255, 255, 255))
-
-
-def _paddle_items(result) -> list[tuple[str, float | None, float, float]]:
-    items: list[tuple[str, float | None, float, float]] = []
-    for page in result or []:
-        payload = page.json if hasattr(page, "json") else page
-        if isinstance(payload, dict) and "res" in payload:
-            payload = payload["res"]
-        if not isinstance(payload, dict):
-            continue
-        texts = payload.get("rec_texts") or []
-        scores = payload.get("rec_scores") or []
-        boxes = payload.get("rec_polys") or payload.get("rec_boxes") or []
-        for index, text in enumerate(texts):
-            if text is None or index >= len(boxes):
-                continue
-            box = np.asarray(boxes[index], dtype="float32")
-            if box.ndim == 1 and len(box) == 4:
-                x1, y1, x2, y2 = box.tolist()
-                x = (x1 + x2) / 2
-                y = (y1 + y2) / 2
-            elif box.ndim == 2 and box.shape[1] >= 2:
-                x = float(box[:, 0].mean())
-                y = float(box[:, 1].mean())
-            else:
-                continue
-            confidence = float(scores[index]) if index < len(scores) else None
-            items.append((str(text).strip(), confidence, x, y))
-    return items
-
-
-def _write_paddle_items(items: list[tuple[str, float | None, float, float]], debug_dir: Path) -> None:
-    debug_dir.mkdir(parents=True, exist_ok=True)
-    payload = [
-        {"text": text, "confidence": confidence, "x": round(x, 2), "y": round(y, 2)}
-        for text, confidence, x, y in items
-    ]
-    with (debug_dir / "paddle_ocr_items.json").open("w", encoding="utf-8") as file:
-        json.dump(payload, file, ensure_ascii=False, indent=2)
-        file.write("\n")
-
-
-def _merge_tesseract_headers_with_paddle_laps(
-    tesseract_results: dict[tuple[int, int], CellOcrResult],
-    paddle_results: dict[tuple[int, int], CellOcrResult],
-) -> dict[tuple[int, int], CellOcrResult]:
-    merged = dict(tesseract_results)
-    lap_row = _find_lap_row(tesseract_results)
-    for key, paddle_cell in paddle_results.items():
-        if not paddle_cell.raw_text.strip():
-            continue
-        tesseract_cell = merged.get(key)
-        if tesseract_cell is None or not tesseract_cell.raw_text.strip() or (lap_row is not None and key[0] > lap_row):
-            merged[key] = paddle_cell
-    return merged
-
-
-def _find_lap_row(cells: dict[tuple[int, int], CellOcrResult]) -> int | None:
-    for (row, _), cell in sorted(cells.items()):
-        normalized = re.sub(r"[^a-z]", "", cell.raw_text.lower())
-        if normalized in {"lapnr", "lpnr", "lapn", "lpn", "lapno", "lapnumber", "lap"}:
-            return row
-    return None
-
-
-def _cell_at(grid: TableGrid, x: float, y: float) -> tuple[int, int] | None:
-    row = _line_interval(grid.y_lines, y)
-    col = _line_interval(grid.x_lines, x)
-    if row is None or col is None:
-        return None
-    return row, col
-
-
-def _line_interval(lines: list[int], value: float) -> int | None:
-    for index in range(len(lines) - 1):
-        if lines[index] <= value < lines[index + 1]:
-            return index
-    return None
 
 
 def _mode_for_cell(row: int, col: int) -> str:

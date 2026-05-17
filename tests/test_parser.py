@@ -63,6 +63,27 @@ def test_parse_compact_ocr_date_and_low_confidence_first_kart() -> None:
     assert [kart.kart_no for kart in parsed.karts] == [1, 7]
 
 
+def test_parse_split_header_date_and_time() -> None:
+    items = [
+        item("Date:", 20, 20),
+        item("2026/", 80, 20),
+        item("5115", 130, 20),
+        item("Time", 200, 20),
+        item("INE", 250, 20),
+        item("04:02", 300, 20),
+        item("33", 350, 20),
+        item("Lap/Nr", 20, 100),
+        item("3", 100, 100),
+        item("20.02", 100, 140),
+        item("19.69", 100, 170),
+    ]
+
+    parsed = parse_lap_sheet(items)
+
+    assert parsed.date == "2026/5/15"
+    assert parsed.printed_time == "04:02:33"
+
+
 def test_missing_kart_number_becomes_unknown_column() -> None:
     items = [
         item("Lap/Nr", 20, 100),

@@ -118,7 +118,7 @@ def test_lap_nr_label_matching_handles_ocr_noise() -> None:
     for value in ["Lap/Nr", "LapINr", "Lap|Nr", "Lp/Nr"]:
         assert looks_like_lap_nr(value)
 
-    for value in ["Date", "Heat", "Pos", "19.43", "Lap Number"]:
+    for value in ["Date", "Heat", "Pos", "19.43", "Ln", "Lap Number"]:
         assert not looks_like_lap_nr(value)
 
 

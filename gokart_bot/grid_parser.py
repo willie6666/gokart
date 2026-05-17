@@ -134,9 +134,9 @@ def looks_like_lap_nr(text: str) -> bool:
     normalized = _normalize_label_text(text)
     if not normalized:
         return False
-    if len(normalized) > 6:
+    if len(normalized) < 4 or len(normalized) > 6:
         return False
-    return any(_fuzzy_contains(normalized, target, max_distance=1) for target in ("lapnr", "lapno", "lapn", "lpnr", "lpn"))
+    return any(_fuzzy_contains(normalized, target, max_distance=1) for target in ("lapnr", "lapno", "lapn", "lpnr"))
 
 
 def looks_like_avg(text: str) -> bool:

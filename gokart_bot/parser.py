@@ -10,7 +10,7 @@ from .models import KartResult
 DATE_RE = re.compile(r"(?:Date\s*[:：]?\s*)?(20\d{2}\s*/\s*\d{1,2}\s*/\s*\d{1,2})", re.IGNORECASE)
 COMPACT_DATE_RE = re.compile(r"Date\s*[:：]?\s*(20\d{2})\s*/\s*(\d{2,4})", re.IGNORECASE)
 HEAT_RE = re.compile(r"Heat\s*[:：]?\s*(?:Heat\s*)?(\d+)", re.IGNORECASE)
-TIME_RE = re.compile(r"(?:Time|Printed)\s*[:：]?\s*(?:上午|下午|AM|PM)?\s*(\d{1,2}[:.]\d{2}(?:[:.]\d{2})?)", re.IGNORECASE)
+TIME_RE = re.compile(r"(?:Time|Printed)\s*[:：]?\s*(上午|下午|AM|PM)?\s*(\d{1,2}[:.]\d{2}(?:[:.]\d{2})?)", re.IGNORECASE)
 LOOSE_TIME_RE = re.compile(r"(?:Time|Printed).{0,30}?(\d{1,2}[:.]\d{2})(?:[\s.]+(\d{2}))?", re.IGNORECASE)
 ANY_TIME_RE = re.compile(r"\b(\d{1,2}[:.]\d{2}[:.]\d{2})\b")
 
@@ -52,7 +52,8 @@ def _find_time(text: str) -> str | None:
     best: str | None = None
     match = TIME_RE.search(text)
     if match:
-        best = match.group(1).replace(".", ":")
+        meridiem, value = match.groups()
+        best = _apply_meridiem(value.replace(".", ":"), meridiem)
     match = LOOSE_TIME_RE.search(text)
     if match:
         value, seconds = match.groups()
@@ -65,6 +66,20 @@ def _find_time(text: str) -> str | None:
         if match:
             best = match.group(1).replace(".", ":")
     return best
+
+
+def _apply_meridiem(value: str, meridiem: str | None) -> str:
+    if not meridiem:
+        return value
+    parts = value.split(":")
+    hour = int(parts[0])
+    marker = meridiem.lower()
+    if marker in {"下午", "pm"} and hour < 12:
+        hour += 12
+    elif marker in {"上午", "am"} and hour == 12:
+        hour = 0
+    parts[0] = f"{hour:02d}"
+    return ":".join(parts)
 
 
 def _find_heat(text: str) -> str | None:

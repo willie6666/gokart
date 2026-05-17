@@ -21,7 +21,7 @@ from .storage import JsonStore
 
 LOGGER = logging.getLogger(__name__)
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-DEBUG_ARTIFACTS = ("grid_overlay.png", "table_warped.png", "virtual_rows_overlay.png", "parsed.json")
+DEBUG_ARTIFACTS = ("table_warped.png", "paddleocr_overlay.png", "grid_overlay.png", "virtual_rows_overlay.png", "parsed.json")
 
 
 class GokartBot(commands.Bot):
@@ -36,6 +36,10 @@ class GokartBot(commands.Bot):
             max_side=config.ocr_max_side,
             debug_ocr=config.debug_ocr,
             debug_dir=config.debug_dir,
+            ocr_lang=config.ocr_lang,
+            ocr_device=config.ocr_device,
+            ocr_enable_mkldnn=config.ocr_enable_mkldnn,
+            ocr_cpu_threads=config.ocr_cpu_threads,
         )
 
     async def close(self) -> None:

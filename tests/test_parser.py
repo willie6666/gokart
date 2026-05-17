@@ -27,6 +27,9 @@ def test_find_time() -> None:
     assert _find_time("Time: 16:18:42") == "16:18:42"
     assert _find_time("Time 04:02 33") == "04:02:33"
     assert _find_time("Printed 14:30") == "14:30"
+    assert _find_time("Time:下午04:56:31") == "16:56:31"
+    assert _find_time("Time:上午12:05:31") == "00:05:31"
+    assert _find_time("Time:下午12:05:31") == "12:05:31"
 
 
 def test_find_time_hh_mm_only() -> None:

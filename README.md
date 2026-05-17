@@ -6,7 +6,7 @@ Discord bot for OCRing go-kart lap sheets and tracking claimed driver records.
 
 - Watch one configured Discord channel for uploaded lap sheet images.
 - Use OpenCV to find, warp, and grid-slice the table.
-- Use EasyOCR-only OCR for headers, kart numbers, lap indexes, and lap times.
+- Use PaddleOCR-only OCR for headers, kart numbers, lap indexes, and lap times.
 - Store records in a local JSON file.
 - Let drivers claim their kart result from Discord buttons.
 - Show per-session results, full lap lists, personal records, and a claimed-driver leaderboard.
@@ -20,7 +20,7 @@ python -m venv .venv
 pip install -e '.[dev]'
 ```
 
-EasyOCR downloads its model files on first use, so the first OCR run is slower.
+PaddleOCR downloads its model files on first use, so the first OCR run is slower.
 
 ## Configuration
 
@@ -38,6 +38,10 @@ GOKART_DEBUG_OCR=true
 GOKART_DEBUG_DIR=data/debug
 GOKART_OCR_MAX_SIDE=1600
 GOKART_OCR_WORKERS=1
+GOKART_OCR_LANG=ch
+GOKART_OCR_DEVICE=cpu
+GOKART_OCR_ENABLE_MKLDNN=false
+GOKART_OCR_CPU_THREADS=8
 ```
 
 Settings:
@@ -49,6 +53,10 @@ Settings:
 - `GOKART_DEBUG_DIR`: local debug artifact directory.
 - `GOKART_OCR_MAX_SIDE`: image resize max side before table detection.
 - `GOKART_OCR_WORKERS`: dedicated OCR thread pool size. Use `1` for lowest CPU contention; increase only if the host can handle multiple OCR jobs.
+- `GOKART_OCR_LANG`: PaddleOCR recognition language. Default `ch` supports Chinese/English mixed text, including `上午` and `下午`.
+- `GOKART_OCR_DEVICE`: PaddleOCR device, usually `cpu`.
+- `GOKART_OCR_ENABLE_MKLDNN`: enable PaddlePaddle MKLDNN CPU acceleration. Default is false because PaddlePaddle 3.2.0's Python API can hang on repeated predictions with MKLDNN enabled.
+- `GOKART_OCR_CPU_THREADS`: PaddleOCR CPU thread count. Set this to your CPU core count for a single OCR worker.
 
 Discord Developer Portal must enable `Message Content Intent`, otherwise the bot cannot see image messages.
 
@@ -57,12 +65,12 @@ Discord Developer Portal must enable `Message Content Intent`, otherwise the bot
 The OCR path is grid-only:
 
 - OpenCV scans and warps the paper/table.
-- OpenCV detects grid lines and crops cells/columns.
-- EasyOCR recognizes all text.
-- Lap columns use OpenCV projection to split each row, then EasyOCR recognizes each row crop.
+- OpenCV detects grid lines and table cells.
+- PaddleOCR recognizes all text.
+- Lap columns are cropped from the detected grid, then PaddleOCR detects and recognizes row words in each column.
 - Virtual lap rows map OCR words back to lap numbers.
 
-EasyOCR Reader instances are cached per OCR worker thread. The bot uses a dedicated OCR executor so long-running image recognition does not run on the Discord event loop.
+When MKLDNN is disabled, PaddleOCR instances are cached per OCR worker thread. With MKLDNN enabled, the bot creates a fresh PaddleOCR predictor per image, but repeated MKLDNN predictions in PaddlePaddle 3.2.0 may still hang; keep it disabled for bot stability unless you are testing locally. The bot uses a dedicated OCR executor so long-running image recognition does not run on the Discord event loop.
 
 ## Run
 
@@ -104,21 +112,19 @@ python -m gokart_bot
 
 When `GOKART_DEBUG_OCR=true`, local debug files are written to `data/debug/session-{id}/`:
 
-- `original.jpg`
-- `paper_warped.png`
 - `table_warped.png`
+- `paddleocr_overlay.png`
 - `grid_overlay.png`
 - `virtual_rows_overlay.png`
 - `cell_ocr.json`
 - `ocr_words.json`
 - `parsed.json`
-- `column_crops/`
-- `cells/`
 
 If `/setdebugchannel` is configured, the bot uploads these artifacts after each OCR regardless of `GOKART_DEBUG_OCR`:
 
 - `grid_overlay.png`
 - `table_warped.png`
+- `paddleocr_overlay.png`
 - `virtual_rows_overlay.png`
 - `parsed.json`
 

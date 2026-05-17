@@ -1,6 +1,4 @@
-import numpy as np
-
-from gokart_bot.cell_ocr import normalize_kart_no, normalize_lap_text, parse_lap_time, _remove_cell_edges
+from gokart_bot.cell_ocr import normalize_kart_no, normalize_lap_text, parse_lap_time
 
 
 def test_normalize_lap_text() -> None:
@@ -19,14 +17,3 @@ def test_normalize_kart_no() -> None:
     assert normalize_kart_no("5 77") == 5
     assert normalize_kart_no("0") is None
     assert normalize_kart_no("1000") is None
-
-
-def test_remove_cell_edges_clears_left_vertical_line() -> None:
-    image = np.full((40, 60), 255, dtype=np.uint8)
-    image[:, :3] = 0
-    image[14:30, 28:35] = 0
-
-    result = _remove_cell_edges(image)
-
-    assert result[:, :4].mean() > 240
-    assert result[14:30, 28:35].mean() < 240

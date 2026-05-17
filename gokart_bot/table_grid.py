@@ -50,12 +50,11 @@ def extract_table_grid(image_path: Path, debug_dir: Path | None = None, max_side
     original = resize_max_side(original, max_side)
     if debug_dir:
         debug_dir.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(debug_dir / "original.jpg"), original)
 
-    scanned, scan_warnings = scan_document(original, debug_dir)
-    table, warnings = find_and_warp_main_table(scanned, debug_dir)
+    scanned, scan_warnings = scan_document(original)
+    table, warnings = find_and_warp_main_table(scanned)
     warnings = scan_warnings + warnings
-    x_lines, y_lines = detect_grid_lines(table, debug_dir)
+    x_lines, y_lines = detect_grid_lines(table)
     col_count = len(x_lines) - 1
     row_count = len(y_lines) - 1
     if col_count < 6:
@@ -70,7 +69,7 @@ def extract_table_grid(image_path: Path, debug_dir: Path | None = None, max_side
     return grid
 
 
-def scan_document(image, debug_dir: Path | None = None):
+def scan_document(image):
     warnings: list[str] = []
     height, width = image.shape[:2]
     candidates: list[tuple[float, np.ndarray]] = []
@@ -97,11 +96,6 @@ def scan_document(image, debug_dir: Path | None = None):
 
     candidates.sort(key=lambda item: item[0], reverse=True)
     warped = warp_perspective(image, _expand_quad(candidates[0][1], image.shape, padding_ratio=0.01))
-    if debug_dir:
-        cv2.imwrite(str(debug_dir / "paper_warped.png"), warped)
-        overlay = image.copy()
-        cv2.polylines(overlay, [candidates[0][1].astype("int32")], True, (0, 0, 255), 4)
-        cv2.imwrite(str(debug_dir / "paper_contour.png"), overlay)
     return warped, warnings
 
 
@@ -119,11 +113,9 @@ def _paper_contours(image):
     return sorted(contours, key=cv2.contourArea, reverse=True)
 
 
-def find_and_warp_main_table(image, debug_dir: Path | None = None):
+def find_and_warp_main_table(image):
     warnings: list[str] = []
     mask = make_line_mask(image)
-    if debug_dir:
-        cv2.imwrite(str(debug_dir / "line_mask.png"), mask)
     connected = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25)))
     connected = cv2.dilate(connected, cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9)), iterations=1)
     contours, _ = cv2.findContours(connected, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -246,7 +238,7 @@ def _quick_grid_counts(image) -> tuple[int, int]:
     return best_rows, best_cols
 
 
-def detect_grid_lines(table_image, debug_dir: Path | None = None) -> tuple[list[int], list[int]]:
+def detect_grid_lines(table_image) -> tuple[list[int], list[int]]:
     horizontal, vertical = make_line_masks(table_image)
     height, width = table_image.shape[:2]
     y_projection = np.count_nonzero(horizontal, axis=1)
@@ -271,9 +263,6 @@ def detect_grid_lines(table_image, debug_dir: Path | None = None) -> tuple[list[
         x_lines = _merge_until_count(x_lines, 31)
     if len(y_lines) > 80:
         y_lines = _merge_until_count(y_lines, 80)
-    if debug_dir:
-        cv2.imwrite(str(debug_dir / "horizontal_mask.png"), horizontal)
-        cv2.imwrite(str(debug_dir / "vertical_mask.png"), vertical)
     return x_lines, y_lines
 
 

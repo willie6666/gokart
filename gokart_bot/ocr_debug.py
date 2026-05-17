@@ -64,6 +64,20 @@ def write_parsed_overlay(grid: TableGrid, parsed: ParsedSheet, debug_dir: Path |
     cv2.imwrite(str(debug_dir / "grid_overlay.png"), image)
 
 
+def write_paddleocr_overlay(grid: TableGrid, words: list[OcrWord], debug_dir: Path | None) -> None:
+    if debug_dir is None:
+        return
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    image = grid.image.copy()
+    for word in words:
+        x1, y1 = int(round(word.x)), int(round(word.y))
+        x2, y2 = int(round(word.x + word.w)), int(round(word.y + word.h))
+        cv2.rectangle(image, (x1, y1), (x2, y2), (0, 128, 255), 1)
+        label = word.text[:16]
+        cv2.putText(image, label, (x1, max(10, y1 - 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 128, 255), 1)
+    cv2.imwrite(str(debug_dir / "paddleocr_overlay.png"), image)
+
+
 def write_ocr_words(
     column_words: dict[int, list[OcrWord]],
     rows: list[VirtualLapRow],

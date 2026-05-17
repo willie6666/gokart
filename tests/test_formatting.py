@@ -37,11 +37,28 @@ def test_laps_display_includes_all_laps() -> None:
     assert "01:20.84s" not in output
 
 
-def test_leaderboard_is_table_like_and_hides_heat() -> None:
-    output = format_leaderboard([session()])
+def test_leaderboard_uses_each_claimed_driver_best_once() -> None:
+    first = session()
+    first.find_kart(12).claimed_by_user_id = 99
+    first.karts.append(KartResult(kart_no=5, position=3, best_lap=18.5, claimed_by_name="unclaimed"))
+    second = SessionRecord(
+        id="2",
+        channel_id=10,
+        source_message_id=21,
+        image_url="https://example.com/image2.jpg",
+        author_user_id=1,
+        author_name="author",
+        created_at=now_iso(),
+        date="2026/5/17",
+        printed_time="05:00:00",
+        karts=[KartResult(kart_no=12, position=1, best_lap=20.0, claimed_by_user_id=99, claimed_by_name="driver")],
+    )
 
-    assert "```text" in output
-    assert "driver" in output
+    output = format_leaderboard([first, second])
+
+    assert "1. 19.65s｜driver(<@99>)｜2026/5/16 04:18:42" in output
+    assert "20.00s" not in output
+    assert "18.50s" not in output
     assert "Heat 12" not in output
 
 

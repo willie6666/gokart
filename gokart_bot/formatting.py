@@ -126,26 +126,23 @@ def format_myrecords(user_id: int, sessions: list[SessionRecord], limit: int = 5
 
 
 def format_leaderboard(sessions: list[SessionRecord], limit: int = 10) -> str:
-    rows: list[tuple[SessionRecord, KartResult]] = []
+    best_by_user: dict[int, tuple[SessionRecord, KartResult]] = {}
     for session in sessions:
         for kart in session.karts:
-            if kart.best_lap is not None:
-                rows.append((session, kart))
-    rows.sort(key=lambda item: item[1].best_lap or 999)
+            if kart.claimed_by_user_id is None or kart.best_lap is None:
+                continue
+            current = best_by_user.get(kart.claimed_by_user_id)
+            if current is None or kart.best_lap < (current[1].best_lap or 999):
+                best_by_user[kart.claimed_by_user_id] = (session, kart)
+
+    rows = sorted(best_by_user.values(), key=lambda item: item[1].best_lap or 999)
 
     if not rows:
-        return "目前沒有可排名的紀錄。"
+        return "目前沒有已認領的可排名紀錄。"
 
     lines = ["卡丁車排行榜"]
-    lines.append("```text")
-    lines.append(f"{'#':>2} {'圈速':>7}  {'車手':<14} {'車號':>4}  {'日期/時間':<18} {'紀錄':>5}")
-    lines.append("-- -------  -------------- ----  ------------------ -----")
     for index, (session, kart) in enumerate(rows[:limit], 1):
-        owner = kart.claimed_by_name or "未認領"
-        label = _session_label(session)
-        kart_no = str(kart.kart_no) if kart.kart_no is not None else "?"
-        lines.append(f"{index:>2} {kart.best_lap:>6.2f}s  {_clip(owner, 14):<14} {kart_no:>4}  {_clip(label, 18):<18} #{session.id:>4}")
-    lines.append("```")
+        lines.append(f"{index}. {kart.best_lap:.2f}s｜{_driver_label(kart)}｜{_session_label(session)}")
     return "\n".join(lines)
 
 
@@ -164,12 +161,12 @@ def _session_label(session: SessionRecord) -> str:
     return " ".join(parts) if parts else "未知日期時間"
 
 
+def _driver_label(kart: KartResult) -> str:
+    mention = f"<@{kart.claimed_by_user_id}>" if kart.claimed_by_user_id is not None else "未知車手"
+    return f"{kart.claimed_by_name}({mention})" if kart.claimed_by_name else mention
+
+
 def _format_lap_table(laps: list[float]) -> str:
     rows = [f"{lap:.2f}s" for lap in laps]
     return "```text\n" + "\n".join(rows) + "\n```"
 
-
-def _clip(value: str, length: int) -> str:
-    if len(value) <= length:
-        return value
-    return value[: max(length - 1, 0)] + "…"

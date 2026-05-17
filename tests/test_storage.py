@@ -127,3 +127,18 @@ def test_record_channel_setting(tmp_path) -> None:
 
     reloaded.set_record_channel_id(None)
     assert reloaded.get_record_channel_id() is None
+
+
+def test_debug_channel_setting(tmp_path) -> None:
+    store = JsonStore(tmp_path / "records.json")
+
+    assert store.get_debug_channel_id() is None
+
+    store.set_debug_channel_id(456)
+    assert store.get_debug_channel_id() == 456
+
+    reloaded = JsonStore(tmp_path / "records.json")
+    assert reloaded.get_debug_channel_id() == 456
+
+    reloaded.set_debug_channel_id(None)
+    assert reloaded.get_debug_channel_id() is None

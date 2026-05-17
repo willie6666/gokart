@@ -23,8 +23,8 @@ class OcrEngine:
         self.debug_ocr = debug_ocr
         self.debug_dir = Path(debug_dir)
 
-    def recognize_lap_sheet(self, image_path: Path, session_id: str | None = None) -> ParsedSheet:
-        debug_dir = self._debug_dir(session_id)
+    def recognize_lap_sheet(self, image_path: Path, session_id: str | None = None, force_debug: bool = False) -> ParsedSheet:
+        debug_dir = self.debug_dir_for_session(session_id) if force_debug else self._debug_dir(session_id)
         grid = extract_table_grid(image_path, debug_dir, self.max_side)
         if grid.row_count < 10 or grid.col_count < 6:
             raise RuntimeError("Grid detection failed; not enough table rows or columns")
@@ -74,6 +74,9 @@ class OcrEngine:
     def _debug_dir(self, session_id: str | None) -> Path | None:
         if not self.debug_ocr:
             return None
+        return self.debug_dir_for_session(session_id)
+
+    def debug_dir_for_session(self, session_id: str | None) -> Path:
         return self.debug_dir / f"session-{session_id or 'manual'}"
 
 

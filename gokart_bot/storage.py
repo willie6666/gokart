@@ -78,15 +78,27 @@ class JsonStore:
         return [session for session in self.all_sessions() if session.result_message_id]
 
     def get_record_channel_id(self) -> int | None:
-        value = self._data["settings"].get("record_channel_id")
-        return int(value) if value is not None else None
+        return self._get_channel_setting("record_channel_id")
 
     def set_record_channel_id(self, channel_id: int | None) -> None:
+        self._set_channel_setting("record_channel_id", channel_id)
+
+    def get_debug_channel_id(self) -> int | None:
+        return self._get_channel_setting("debug_channel_id")
+
+    def set_debug_channel_id(self, channel_id: int | None) -> None:
+        self._set_channel_setting("debug_channel_id", channel_id)
+
+    def _get_channel_setting(self, key: str) -> int | None:
+        value = self._data["settings"].get(key)
+        return int(value) if value is not None else None
+
+    def _set_channel_setting(self, key: str, channel_id: int | None) -> None:
         with self._lock:
             if channel_id is None:
-                self._data["settings"].pop("record_channel_id", None)
+                self._data["settings"].pop(key, None)
             else:
-                self._data["settings"]["record_channel_id"] = int(channel_id)
+                self._data["settings"][key] = int(channel_id)
             self.save()
 
     def claim_kart(self, session_id: str, kart_no: int, user_id: int, display_name: str) -> SessionRecord:

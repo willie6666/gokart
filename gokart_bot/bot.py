@@ -19,6 +19,7 @@ from .storage import JsonStore
 
 LOGGER = logging.getLogger(__name__)
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+DEBUG_ARTIFACTS = ("grid_overlay.png", "table_warped.png", "virtual_rows_overlay.png", "parsed.json")
 
 
 class GokartBot(commands.Bot):
@@ -50,7 +51,9 @@ class GokartBot(commands.Bot):
         self.tree.add_command(record_channel_command)
         self.tree.add_command(set_record_channel_command)
         self.tree.add_command(clear_record_channel_command)
-        self.tree.add_command(sync_command)
+        self.tree.add_command(debug_channel_command)
+        self.tree.add_command(set_debug_channel_command)
+        self.tree.add_command(clear_debug_channel_command)
         self.tree.add_command(ping_command)
         await self.tree.sync()
 
@@ -80,11 +83,18 @@ class GokartBot(commands.Bot):
         image_path.parent.mkdir(parents=True, exist_ok=True)
         await attachment.save(image_path)
 
+        debug_channel_id = self.store.get_debug_channel_id()
         try:
-            parsed = await asyncio.to_thread(self.ocr.recognize_lap_sheet, image_path, session_id)
+            parsed = await asyncio.to_thread(
+                self.ocr.recognize_lap_sheet,
+                image_path,
+                session_id,
+                force_debug=debug_channel_id is not None,
+            )
             raw_ocr = parsed.raw_debug_summary or {"mode": "grid"}
         except Exception as exc:
             LOGGER.exception("OCR failed for %s", attachment.filename)
+            await self.send_debug_artifacts(session_id, attachment.filename)
             await progress.edit(content=f"辨識失敗：{exc}")
             return
 
@@ -111,6 +121,7 @@ class GokartBot(commands.Bot):
         session.result_message_id = progress.id
         self.store.update_session(session)
         self.add_view(ClaimView(self.store, session.id), message_id=progress.id)
+        await self.send_debug_artifacts(session_id, attachment.filename)
 
     async def refresh_session_message(self, session: SessionRecord) -> None:
         if session.result_message_id is None:
@@ -120,6 +131,24 @@ class GokartBot(commands.Bot):
             return
         message = await channel.fetch_message(session.result_message_id)
         await message.edit(content=_fit_discord_message(format_session(session)), view=ClaimView(self.store, session.id))
+
+    async def send_debug_artifacts(self, session_id: str, source_filename: str) -> None:
+        debug_channel_id = self.store.get_debug_channel_id()
+        if debug_channel_id is None:
+            return
+        try:
+            channel = self.get_channel(debug_channel_id) or await self.fetch_channel(debug_channel_id)
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                LOGGER.warning("Configured debug channel %s is not a text channel or thread", debug_channel_id)
+                return
+            debug_dir = self.ocr.debug_dir_for_session(session_id)
+            files = [discord.File(path, filename=path.name) for name in DEBUG_ARTIFACTS if (path := debug_dir / name).exists()]
+            if not files:
+                await channel.send(f"Session #{session_id} debug artifacts not found for `{source_filename}`.")
+                return
+            await channel.send(f"Session #{session_id} debug artifacts for `{source_filename}`", files=files)
+        except discord.HTTPException:
+            LOGGER.exception("Failed to send debug artifacts for session %s", session_id)
 
 
 @app_commands.command(name="me", description="查詢自己的卡丁車歷史紀錄")
@@ -274,11 +303,36 @@ async def clear_record_channel_command(interaction: discord.Interaction) -> None
     await interaction.response.send_message("已清除紀錄圖片頻道設定。bot 目前不會自動辨識任何圖片。", ephemeral=True)
 
 
-@app_commands.command(name="sync", description="重新同步 slash commands")
-async def sync_command(interaction: discord.Interaction) -> None:
+@app_commands.command(name="debugchannel", description="查看目前設定的 OCR debug 圖片頻道")
+async def debug_channel_command(interaction: discord.Interaction) -> None:
     bot = _bot(interaction)
-    await bot.tree.sync()
-    await interaction.response.send_message("已同步指令。", ephemeral=True)
+    channel_id = bot.store.get_debug_channel_id()
+    content = f"目前 OCR debug 頻道：<#{channel_id}>" if channel_id else "目前未設定 OCR debug 頻道。"
+    await interaction.response.send_message(content, ephemeral=True)
+
+
+@app_commands.command(name="setdebugchannel", description="設定 OCR debug artifacts 要傳送到哪個頻道")
+@app_commands.describe(channel="OCR debug 頻道。不填則使用目前頻道")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def set_debug_channel_command(interaction: discord.Interaction, channel: discord.TextChannel | None = None) -> None:
+    bot = _bot(interaction)
+    target = channel or interaction.channel
+    if not isinstance(target, discord.TextChannel):
+        await interaction.response.send_message("請在文字頻道使用，或指定一個文字頻道。", ephemeral=True)
+        return
+    bot.store.set_debug_channel_id(target.id)
+    await interaction.response.send_message(
+        f"已設定 OCR debug 頻道為 {target.mention}。之後每次辨識都會上傳 debug artifacts，無論 .env debug 是否開啟。",
+        ephemeral=True,
+    )
+
+
+@app_commands.command(name="cleardebugchannel", description="清除 OCR debug 圖片頻道設定")
+@app_commands.checks.has_permissions(manage_guild=True)
+async def clear_debug_channel_command(interaction: discord.Interaction) -> None:
+    bot = _bot(interaction)
+    bot.store.set_debug_channel_id(None)
+    await interaction.response.send_message("已清除 OCR debug 頻道設定。", ephemeral=True)
 
 
 @app_commands.command(name="ping", description="檢查 bot 是否在線")

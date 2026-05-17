@@ -12,7 +12,7 @@ from .lap_row_detector import TesseractWord, looks_like_lap_candidate
 from .table_grid import TableGrid
 
 
-TESSERACT_DPI_CONFIG = "--dpi 300 -c user_defined_dpi=300"
+TESSERACT_DPI = "--dpi 300 -c user_defined_dpi=300"
 
 
 @dataclass(frozen=True)
@@ -38,11 +38,11 @@ class CellOcrEngine:
         self.has_tesseract = _has_tesseract()
 
     def recognize_cell(self, image: np.ndarray, mode: str) -> tuple[str, float | None]:
-        ocr_image = upscale_cell_for_tesseract(image, mode)
-        tesseract = _try_tesseract(ocr_image, mode) if self.has_tesseract else None
-        if tesseract is not None:
-            return tesseract, None
-        return "", None
+        if not self.has_tesseract:
+            return "", None
+        ocr_image = _preprocess(image, mode)
+        result = _tesseract_string(ocr_image, mode)
+        return (result, None) if result else ("", None)
 
     def recognize_header_cells(self, grid: TableGrid, debug_dir: Path | None = None) -> dict[tuple[int, int], CellOcrResult]:
         return self._recognize_grid_with_tesseract(grid, debug_dir)
@@ -50,54 +50,27 @@ class CellOcrEngine:
     def recognize_text_region(self, image: np.ndarray) -> str:
         if not self.has_tesseract:
             return ""
-        try:
-            import pytesseract
-        except ModuleNotFoundError:
-            return ""
-        variants = make_tesseract_variants(upscale_header_for_tesseract(image))
-        outputs: list[str] = []
-        for variant in variants:
-            for config in _with_tesseract_dpi(("--oem 1 --psm 6", "--oem 1 --psm 11", "--oem 1 --psm 7")):
-                try:
-                    text = pytesseract.image_to_string(variant, config=config).strip()
-                except Exception:
-                    continue
-                if text:
-                    outputs.append(" ".join(text.split()))
-        return max(outputs, key=len) if outputs else ""
+        ocr_image = _upscale(image, target_height=260)
+        return _tesseract_string(ocr_image, "text") or ""
 
     def recognize_integer_candidates(self, image: np.ndarray) -> list[str]:
         if not self.has_tesseract:
             return []
-        try:
-            import pytesseract
-        except ModuleNotFoundError:
-            return []
-        candidates: list[str] = []
-        variants = make_tesseract_variants(preprocess_cell_for_tesseract(image, "integer"))
-        for variant in variants:
-            for config in _with_tesseract_dpi((
-                "--oem 1 --psm 10 -c tessedit_char_whitelist=0123456789",
-                "--oem 1 --psm 8 -c tessedit_char_whitelist=0123456789",
-                "--oem 1 --psm 13 -c tessedit_char_whitelist=0123456789",
-            )):
-                try:
-                    text = pytesseract.image_to_string(variant, config=config).strip()
-                except Exception:
-                    continue
-                digits = re.sub(r"[^0-9]", "", text)
-                if digits:
-                    candidates.append(digits)
-        return candidates
+        ocr_image = _preprocess(image, "integer")
+        result = _tesseract_string(ocr_image, "integer")
+        digits = re.sub(r"[^0-9]", "", result)
+        return [digits] if digits else []
 
     def recognize_column_words(self, image: np.ndarray, mode: str = "lap_time") -> list[TesseractWord]:
         if not self.has_tesseract:
             raise RuntimeError("Tesseract is required for virtual-row column OCR")
         words: list[TesseractWord] = []
-        for crop, y_offset in _column_ocr_passes(image):
-            ocr_image, scale = upscale_for_tesseract(crop)
-            for variant in make_tesseract_variants(ocr_image):
-                words.extend(_offset_words(_scale_words(_tesseract_data_words(variant, mode), 1 / scale), y_offset))
+        for crop, y_offset in _column_passes(image):
+            ocr_image, scale = _upscale_with_scale(crop)
+            pass_words = _tesseract_data_words(ocr_image, mode)
+            pass_words = _scale_words(pass_words, 1 / scale)
+            pass_words = _offset_words(pass_words, y_offset)
+            words.extend(pass_words)
 
         deduped: dict[tuple[str, int, int], TesseractWord] = {}
         for word in words:
@@ -168,67 +141,100 @@ def parse_lap_time(text: str) -> float | None:
     return value
 
 
-def _try_tesseract(image: np.ndarray, mode: str) -> str | None:
-    try:
-        import pytesseract
-    except ModuleNotFoundError:
-        return None
-    whitelist = {
-        "integer": "0123456789",
-        "lap_time": "0123456789.,:Il|Oo",
-        "text": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/:. ",
-    }.get(mode, "")
-    psm = 10 if mode == "integer" else 7
-    config = f"{TESSERACT_DPI_CONFIG} --oem 1 --psm {psm}"
-    if whitelist:
-        config += f" -c tessedit_char_whitelist={whitelist}"
+def _preprocess(image: np.ndarray, mode: str) -> np.ndarray:
+    """Single-pass preprocessing: clean edges, enhance, upscale."""
+    target_height = {"integer": 180, "lap_time": 140, "text": 120}.get(mode, 140)
+    if mode == "text":
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
+        ocr = make_ocr_image(gray)
+        return _resize_min(ocr, target_height)
+    cleaned = _remove_cell_edges(image)
+    gray = cv2.cvtColor(cleaned, cv2.COLOR_BGR2GRAY) if cleaned.ndim == 3 else cleaned.copy()
+    ocr = make_ocr_image(gray)
+    return _resize_min(ocr, target_height)
+
+
+def _tesseract_string(image: np.ndarray, mode: str) -> str:
+    import pytesseract
+
+    config = _tesseract_config(mode)
     try:
         return pytesseract.image_to_string(image, config=config).strip()
     except Exception:
-        return None
+        return ""
 
 
-def upscale_for_tesseract(image: np.ndarray) -> tuple[np.ndarray, float]:
-    height, width = image.shape[:2]
+def _tesseract_data_words(image: np.ndarray, mode: str) -> list[TesseractWord]:
+    import pytesseract
+    from pytesseract import Output
+
+    config = _tesseract_config(mode)
+    try:
+        data = pytesseract.image_to_data(image, config=config, output_type=Output.DICT)
+    except Exception:
+        return []
+    words: list[TesseractWord] = []
+    for index, text in enumerate(data.get("text", [])):
+        text = str(text).strip()
+        if not text:
+            continue
+        try:
+            confidence_value = float(data["conf"][index])
+        except (ValueError, TypeError):
+            confidence_value = -1.0
+        words.append(
+            TesseractWord(
+                text=text,
+                confidence=confidence_value if confidence_value >= 0 else None,
+                x=float(data["left"][index]),
+                y=float(data["top"][index]),
+                w=float(data["width"][index]),
+                h=float(data["height"][index]),
+            )
+        )
+    return words
+
+
+def _tesseract_config(mode: str) -> str:
+    whitelist = {
+        "integer": "0123456789",
+        "lap_index": "0123456789",
+        "lap_time": "0123456789.,:Il|Oo",
+        "text": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/:. ",
+    }.get(mode, "")
+    psm = 10 if mode == "integer" else 6
+    parts = [TESSERACT_DPI, f"--oem 1 --psm {psm}"]
+    if whitelist:
+        parts.append(f"-c tessedit_char_whitelist={whitelist}")
+    return " ".join(parts)
+
+
+def _upscale(image: np.ndarray, target_height: int = 260) -> np.ndarray:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
+    ocr = make_ocr_image(gray)
+    return _resize_min(ocr, target_height)
+
+
+def _upscale_with_scale(image: np.ndarray) -> tuple[np.ndarray, float]:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
+    ocr = make_ocr_image(gray)
+    height = ocr.shape[0]
     if height < 900:
         scale = 900 / max(height, 1)
-        return cv2.resize(image, (max(1, int(width * scale)), 900), interpolation=cv2.INTER_CUBIC), scale
-    return image, 1.0
+        new_w = max(1, int(ocr.shape[1] * scale))
+        return cv2.resize(ocr, (new_w, 900), interpolation=cv2.INTER_CUBIC), scale
+    return ocr, 1.0
 
 
-def upscale_cell_for_tesseract(image: np.ndarray, mode: str) -> np.ndarray:
-    return preprocess_cell_for_tesseract(image, mode)
-
-
-def preprocess_cell_for_tesseract(image: np.ndarray, mode: str) -> np.ndarray:
-    target_height = {"integer": 180, "lap_time": 140, "text": 120}.get(mode, 140)
-    if mode == "text":
-        return _upscale_enhanced_cell(image, target_height)
-    cleaned = _remove_cell_borders(image)
-    ocr_image = make_ocr_image(cleaned)
-    height, width = ocr_image.shape[:2]
-    scale = min(max(target_height / max(height, 1), 2.0), 4.0)
-    return cv2.resize(
-        ocr_image,
-        (max(1, int(width * scale)), max(1, int(height * scale))),
-        interpolation=cv2.INTER_CUBIC,
-    )
-
-
-def _upscale_enhanced_cell(image: np.ndarray, target_height: int) -> np.ndarray:
-    ocr_image = make_ocr_image(image)
-    height, width = ocr_image.shape[:2]
+def _resize_min(image: np.ndarray, target_height: int) -> np.ndarray:
+    height, width = image.shape[:2]
     if height >= target_height:
-        return ocr_image
+        return image
     scale = min(max(target_height / max(height, 1), 2.0), 4.0)
-    return cv2.resize(
-        ocr_image,
-        (max(1, int(width * scale)), max(1, int(height * scale))),
-        interpolation=cv2.INTER_CUBIC,
-    )
+    return cv2.resize(image, (max(1, int(width * scale)), max(1, int(height * scale))), interpolation=cv2.INTER_CUBIC)
 
 
-def _remove_cell_borders(image: np.ndarray) -> np.ndarray:
+def _remove_cell_edges(image: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
     if gray.size == 0:
         return gray
@@ -252,23 +258,7 @@ def _remove_cell_borders(image: np.ndarray) -> np.ndarray:
     return result
 
 
-def upscale_header_for_tesseract(image: np.ndarray, target_height: int = 260, max_aspect_ratio: float = 8.0) -> np.ndarray:
-    height, width = image.shape[:2]
-    if height <= 0:
-        return image
-    scale = max(target_height / height, 1.0)
-    resized = cv2.resize(image, (max(1, int(width * scale)), max(1, int(height * scale))), interpolation=cv2.INTER_CUBIC)
-    resized_height, resized_width = resized.shape[:2]
-    target_padded_height = max(resized_height, int(resized_width / max_aspect_ratio))
-    if target_padded_height <= resized_height:
-        return resized
-    pad_total = target_padded_height - resized_height
-    pad_top = pad_total // 2
-    pad_bottom = pad_total - pad_top
-    return cv2.copyMakeBorder(resized, pad_top, pad_bottom, 0, 0, cv2.BORDER_CONSTANT, value=(255, 255, 255))
-
-
-def _column_ocr_passes(image: np.ndarray) -> list[tuple[np.ndarray, float]]:
+def _column_passes(image: np.ndarray) -> list[tuple[np.ndarray, float]]:
     height = image.shape[0]
     if height < 160:
         return [(image, 0.0)]
@@ -285,15 +275,8 @@ def _scale_words(words: list[TesseractWord], scale: float) -> list[TesseractWord
     if scale == 1.0:
         return words
     return [
-        TesseractWord(
-            text=word.text,
-            confidence=word.confidence,
-            x=word.x * scale,
-            y=word.y * scale,
-            w=word.w * scale,
-            h=word.h * scale,
-        )
-        for word in words
+        TesseractWord(text=w.text, confidence=w.confidence, x=w.x * scale, y=w.y * scale, w=w.w * scale, h=w.h * scale)
+        for w in words
     ]
 
 
@@ -301,67 +284,9 @@ def _offset_words(words: list[TesseractWord], y_offset: float) -> list[Tesseract
     if y_offset == 0:
         return words
     return [
-        TesseractWord(
-            text=word.text,
-            confidence=word.confidence,
-            x=word.x,
-            y=word.y + y_offset,
-            w=word.w,
-            h=word.h,
-        )
-        for word in words
+        TesseractWord(text=w.text, confidence=w.confidence, x=w.x, y=w.y + y_offset, w=w.w, h=w.h)
+        for w in words
     ]
-
-
-def make_tesseract_variants(image: np.ndarray) -> list[np.ndarray]:
-    base = make_ocr_image(image)
-    _, otsu = cv2.threshold(base, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
-    adaptive = cv2.adaptiveThreshold(base, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 8)
-    return [base, otsu, adaptive]
-
-
-def _tesseract_data_words(image: np.ndarray, mode: str) -> list[TesseractWord]:
-    try:
-        import pytesseract
-        from pytesseract import Output
-    except ModuleNotFoundError:
-        return []
-    whitelist = {
-        "integer": "0123456789",
-        "lap_index": "0123456789",
-        "lap_time": "0123456789.,:Il|Oo",
-        "text": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/:. ",
-    }.get(mode, "")
-    configs = ["--oem 1 --psm 6", "--oem 1 --psm 11"] if mode in {"lap_time", "lap_index"} else ["--oem 1 --psm 7"]
-    if whitelist:
-        configs = [f"{config} -c tessedit_char_whitelist={whitelist}" for config in configs]
-    configs = _with_tesseract_dpi(configs)
-    words: list[TesseractWord] = []
-    for config in configs:
-        try:
-            data = pytesseract.image_to_data(image, config=config, output_type=Output.DICT)
-        except Exception:
-            continue
-        for index, text in enumerate(data.get("text", [])):
-            text = str(text).strip()
-            if not text:
-                continue
-            try:
-                confidence_value = float(data["conf"][index])
-            except (ValueError, TypeError):
-                confidence_value = -1.0
-            confidence = confidence_value if confidence_value >= 0 else None
-            words.append(
-                TesseractWord(
-                    text=text,
-                    confidence=confidence,
-                    x=float(data["left"][index]),
-                    y=float(data["top"][index]),
-                    w=float(data["width"][index]),
-                    h=float(data["height"][index]),
-                )
-            )
-    return words
 
 
 def _looks_like_lap_index(text: str) -> bool:
@@ -370,10 +295,6 @@ def _looks_like_lap_index(text: str) -> bool:
         return False
     value = int(stripped)
     return 1 <= value <= 80
-
-
-def _with_tesseract_dpi(configs) -> list[str]:
-    return [f"{TESSERACT_DPI_CONFIG} {config}" for config in configs]
 
 
 def _has_tesseract() -> bool:

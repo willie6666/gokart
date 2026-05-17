@@ -1,122 +1,45 @@
-from gokart_bot.ocr import OcrText
-from gokart_bot.parser import parse_lap_sheet
+from gokart_bot.parser import _find_date, _find_heat, _find_time
 
 
-def item(text: str, x: float, y: float, score: float = 0.95) -> OcrText:
-    return OcrText(text=text, score=score, box=[(x - 10, y - 5), (x + 10, y - 5), (x + 10, y + 5), (x - 10, y + 5)])
+def test_find_date_standard() -> None:
+    assert _find_date("Date: 2026/5/16") == "2026/5/16"
+    assert _find_date("2026/5/16 Heat 12") == "2026/5/16"
 
 
-def test_parse_lap_sheet_by_coordinates() -> None:
-    items = [
-        item("Date:", 20, 20),
-        item("2026/5/16", 90, 20),
-        item("Heat:", 180, 20),
-        item("Heat 12", 240, 20),
-        item("Lap/Nr", 20, 100),
-        item("12", 100, 100),
-        item("7", 180, 100),
-        item("1", 20, 140),
-        item("20.84", 100, 140),
-        item("21.62", 180, 140),
-        item("2", 20, 170),
-        item("19.65", 100, 170),
-        item("20.18", 180, 170),
-    ]
-
-    parsed = parse_lap_sheet(items)
-
-    assert parsed.date == "2026/5/16"
-    assert parsed.heat == "Heat 12"
-    assert len(parsed.karts) == 2
-    assert parsed.karts[0].kart_no == 12
-    assert parsed.karts[0].best_lap == 19.65
-    assert parsed.karts[1].kart_no == 7
-    assert parsed.karts[1].best_lap == 20.18
+def test_find_date_compact() -> None:
+    assert _find_date("Date: 2026/518") == "2026/5/8"
+    assert _find_date("Date: 2026/5115") == "2026/5/15"
 
 
-def test_parse_lap_sheet_falls_back_to_kart_numbers() -> None:
-    items = [
-        item("Lap/Nr", 20, 100),
-        item("3", 100, 100),
-        item("8", 180, 100),
-        item("20.70", 100, 140),
-    ]
-
-    parsed = parse_lap_sheet(items)
-
-    assert [kart.kart_no for kart in parsed.karts] == [3]
+def test_find_date_time_split_compact() -> None:
+    text = "Date: 2026/ 5115 Time INE 04:02 33"
+    assert _find_date(text) == "2026/5/15"
+    assert _find_time(text) == "04:02:33"
 
 
-def test_parse_compact_ocr_date_keeps_first_kart_eleven() -> None:
-    items = [
-        item("Date: 2026/518", 90, 20),
-        item("Lap/Nr", 20, 100),
-        item("11", 100, 100, score=0.69),
-        item("7", 180, 100),
-        item("20.22", 100, 140),
-        item("20.42", 180, 140),
-    ]
-
-    parsed = parse_lap_sheet(items)
-
-    assert parsed.date == "2026/5/8"
-    assert [kart.kart_no for kart in parsed.karts] == [11, 7]
+def test_find_heat() -> None:
+    assert _find_heat("Heat 12") == "Heat 12"
+    assert _find_heat("Heat: 12") == "Heat 12"
+    assert _find_heat("Heat Heat 5") == "Heat 5"
 
 
-def test_parse_split_header_date_and_time() -> None:
-    items = [
-        item("Date:", 20, 20),
-        item("2026/", 80, 20),
-        item("5115", 130, 20),
-        item("Time", 200, 20),
-        item("INE", 250, 20),
-        item("04:02", 300, 20),
-        item("33", 350, 20),
-        item("Lap/Nr", 20, 100),
-        item("3", 100, 100),
-        item("20.02", 100, 140),
-        item("19.69", 100, 170),
-    ]
-
-    parsed = parse_lap_sheet(items)
-
-    assert parsed.date == "2026/5/15"
-    assert parsed.printed_time == "04:02:33"
+def test_find_time() -> None:
+    assert _find_time("Time: 16:18:42") == "16:18:42"
+    assert _find_time("Time 04:02 33") == "04:02:33"
+    assert _find_time("Printed 14:30") == "14:30"
 
 
-def test_missing_kart_number_becomes_unknown_column() -> None:
-    items = [
-        item("Lap/Nr", 20, 100),
-        item("3", 100, 100),
-        item("8", 200, 100),
-        item("5", 400, 100),
-        item("20.82", 100, 150),
-        item("19.69", 200, 150),
-        item("21.26", 300, 150),
-        item("21.84", 400, 150),
-        item("20.90", 100, 170),
-        item("19.87", 200, 170),
-        item("21.33", 300, 170),
-        item("22.17", 400, 170),
-    ]
-
-    parsed = parse_lap_sheet(items)
-
-    assert [kart.kart_no for kart in parsed.karts] == [3, 8, None, 5]
-    assert parsed.karts[2].best_lap == 21.26
+def test_find_time_hh_mm_only() -> None:
+    assert _find_time("Time 12:34") == "12:34"
 
 
-def test_does_not_infer_missing_first_kart_when_second_is_two() -> None:
-    items = [
-        item("Lp/Nr", 20, 100),
-        item("2", 200, 100),
-        item("19.42", 100, 150),
-        item("24.26", 200, 150),
-        item("19.57", 100, 170),
-        item("24.58", 200, 170),
-    ]
+def test_find_date_none() -> None:
+    assert _find_date("No date here") is None
 
-    parsed = parse_lap_sheet(items)
 
-    assert [kart.kart_no for kart in parsed.karts] == [None, 2]
-    assert parsed.karts[0].best_lap == 19.42
+def test_find_heat_none() -> None:
+    assert _find_heat("No heat here") is None
+
+
+def test_find_time_none() -> None:
+    assert _find_time("No time here") is None

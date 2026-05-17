@@ -14,7 +14,6 @@ from .discord_views import ClaimView
 from .formatting import format_laps, format_leaderboard, format_myrecords, format_record_channel, format_session, format_user_records
 from .models import SessionRecord, now_iso
 from .ocr import OcrEngine
-from .parser import parse_lap_sheet
 from .storage import JsonStore
 
 
@@ -29,15 +28,8 @@ class GokartBot(commands.Bot):
         super().__init__(command_prefix="!gokart ", intents=intents)
         self.store = store
         self.image_dir = config.image_dir
-        self.min_ocr_confidence = config.min_ocr_confidence
-        self.ocr_mode = config.ocr_mode
         self.ocr = OcrEngine(
             max_side=config.ocr_max_side,
-            det_limit_side_len=config.ocr_det_limit_side_len,
-            det_model=config.ocr_det_model,
-            rec_model=config.ocr_rec_model,
-            cpu_threads=config.ocr_cpu_threads,
-            rectify_table=config.ocr_rectify_table,
             debug_ocr=config.debug_ocr,
             debug_dir=config.debug_dir,
         )
@@ -89,13 +81,8 @@ class GokartBot(commands.Bot):
         await attachment.save(image_path)
 
         try:
-            if self.ocr_mode == "legacy":
-                ocr_items = await asyncio.to_thread(self.ocr.recognize, image_path)
-                parsed = parse_lap_sheet(ocr_items, self.min_ocr_confidence)
-                raw_ocr = {"mode": "legacy", "items": [item.to_dict() for item in ocr_items]}
-            else:
-                parsed = await asyncio.to_thread(self.ocr.recognize_lap_sheet, image_path, session_id)
-                raw_ocr = parsed.raw_debug_summary or {"mode": "grid"}
+            parsed = await asyncio.to_thread(self.ocr.recognize_lap_sheet, image_path, session_id)
+            raw_ocr = parsed.raw_debug_summary or {"mode": "grid"}
         except Exception as exc:
             LOGGER.exception("OCR failed for %s", attachment.filename)
             await progress.edit(content=f"辨識失敗：{exc}")

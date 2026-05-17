@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from .cell_ocr import CellOcrEngine
 from .grid_parser import parse_grid_sheet, parse_grid_sheet_with_virtual_rows
@@ -18,7 +19,7 @@ class OcrEngine:
         debug_dir: Path | str = Path("data/debug"),
         ocr_lang: str = "ch",
         ocr_device: str = "cpu",
-        ocr_enable_mkldnn: bool = True,
+        ocr_enable_mkldnn: bool = False,
         ocr_cpu_threads: int = 1,
     ) -> None:
         self.max_side = max_side
@@ -52,12 +53,7 @@ class OcrEngine:
         for col in range(lap_col, grid.col_count):
             region = crop_column_region(grid, col, y_start=y_start, y_end=int(y_end) if y_end else None)
             mode = "lap_index" if col == lap_col else "lap_time"
-            words = _column_words_from_table_words(table_words, region, mode)
-            translated = [
-                type(word)(word.text, word.confidence, word.x, word.y, word.w, word.h)
-                for word in words
-            ]
-            column_words[col] = translated
+            column_words[col] = _column_words_from_table_words(table_words, region, mode)
 
         all_words = [word for words in column_words.values() for word in words]
         virtual_rows = detect_virtual_lap_rows(all_words, float(y_start), int(y_end or grid.image.shape[0]))
@@ -113,7 +109,6 @@ def _find_avg_y(grid, header_cells, start_row: int) -> float | None:
 def _column_words_from_table_words(table_words, region, mode: str):
     from .cell_ocr import normalize_lap_text, parse_lap_time
     from .lap_row_detector import looks_like_lap_candidate
-    import re
 
     words = []
     x1 = region.x_offset

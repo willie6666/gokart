@@ -15,7 +15,7 @@ class ClaimView(discord.ui.View):
         if session is None:
             return
         claimable = [kart for kart in session.karts if kart.position is not None]
-        for index, kart in enumerate(claimable[:25]):
+        for index, kart in enumerate(claimable[:20]):
             disabled = kart.claimed_by_user_id is not None
             button = ClaimButton(session_id, kart.position, kart.kart_no, disabled=disabled, claimed_by_name=kart.claimed_by_name)
             button.row = index // 5
@@ -47,7 +47,7 @@ class ClaimButton(discord.ui.Button[ClaimView]):
             return
 
         new_view = ClaimView(self.view.store, self.session_id)
-        await interaction.response.edit_message(content=format_session(session), view=new_view)
+        await interaction.response.edit_message(content=_fit_discord_message(format_session(session)), view=new_view)
         kart = next((candidate for candidate in session.karts if candidate.position == self.position), None)
         label = f"車號 {kart.kart_no}" if kart and kart.kart_no is not None else f"欄位 {self.position}"
         best = f"{kart.best_lap:.2f}s" if kart and kart.best_lap is not None else "未知"
@@ -92,4 +92,10 @@ class KartLapsSelect(discord.ui.Select[ClaimView]):
         if kart is None:
             await interaction.response.send_message(f"找不到欄位 {position}", ephemeral=True)
             return
-        await interaction.response.send_message(format_kart_laps(session, kart), ephemeral=True)
+        await interaction.response.send_message(_fit_discord_message(format_kart_laps(session, kart)), ephemeral=True)
+
+
+def _fit_discord_message(content: str) -> str:
+    if len(content) <= 1900:
+        return content
+    return content[:1850] + "\n...（內容過長，已截斷。可用 /laps 查詢完整圈速。）"

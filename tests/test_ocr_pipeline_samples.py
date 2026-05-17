@@ -14,6 +14,8 @@ def test_sample_image_grid_artifacts(expected_name: str, tmp_path: Path) -> None
     expected_path = Path("tests/fixtures/expected") / expected_name
     expected = json.loads(expected_path.read_text(encoding="utf-8"))
     image_path = Path(expected["image"])
+    if not image_path.exists():
+        pytest.skip(f"sample image not available: {image_path}")
     grid = extract_table_grid(image_path, tmp_path / expected_name, max_side=1600)
 
     if expected.get("requires_warning"):

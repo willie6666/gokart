@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 import io
 import logging
+import math
 from pathlib import Path
 
 import discord
@@ -369,7 +370,10 @@ def _parse_laps_argument(value: str) -> list[float]:
         stripped = part.strip()
         if not stripped:
             continue
-        laps.append(float(stripped))
+        lap = float(stripped)
+        if not math.isfinite(lap) or lap <= 0:
+            raise ValueError("Lap time must be a positive finite number")
+        laps.append(lap)
     return laps
 
 

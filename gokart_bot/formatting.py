@@ -163,7 +163,7 @@ def _session_label(session: SessionRecord) -> str:
 
 def _driver_label(kart: KartResult) -> str:
     mention = f"<@{kart.claimed_by_user_id}>" if kart.claimed_by_user_id is not None else "未知車手"
-    return f"{kart.claimed_by_name}({mention})" if kart.claimed_by_name else mention
+    return f"{mention}" if kart.claimed_by_name else mention
 
 
 def _format_lap_table(laps: list[float]) -> str:

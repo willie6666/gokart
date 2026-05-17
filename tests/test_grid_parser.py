@@ -1,7 +1,7 @@
 import numpy as np
 
 from gokart_bot.cell_ocr import CellOcrResult
-from gokart_bot.grid_parser import parse_grid_sheet
+from gokart_bot.grid_parser import looks_like_avg, looks_like_lap_nr, parse_grid_sheet
 from gokart_bot.table_grid import TableGrid, build_cells
 
 
@@ -112,3 +112,19 @@ def test_first_kart_eleven_before_two_is_not_auto_corrected() -> None:
     parsed = parse_grid_sheet(grid(), cells)
 
     assert [kart.kart_no for kart in parsed.karts] == [11, 2]
+
+
+def test_lap_nr_label_matching_handles_ocr_noise() -> None:
+    for value in ["Lap/Nr", "LapINr", "Lap|Nr", "Lp/Nr"]:
+        assert looks_like_lap_nr(value)
+
+    for value in ["Date", "Heat", "Pos", "19.43", "Lap Number"]:
+        assert not looks_like_lap_nr(value)
+
+
+def test_avg_label_matching_handles_ocr_noise() -> None:
+    for value in ["Avg", "Avg.", "Avq", "HAvq", "LAva:", "LAvg"]:
+        assert looks_like_avg(value)
+
+    for value in ["Lap/Nr", "Date", "Heat", "19.43", "Average"]:
+        assert not looks_like_avg(value)

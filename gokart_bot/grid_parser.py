@@ -131,13 +131,21 @@ def parse_grid_sheet_with_virtual_rows(
 
 
 def looks_like_lap_nr(text: str) -> bool:
-    normalized = re.sub(r"[^a-z]", "", text.lower())
-    return normalized in {"lapnr", "lapinr", "laplnr", "lpnr", "lapn", "lpn", "lapno", "lapnumber", "lap"}
+    normalized = _normalize_label_text(text)
+    if not normalized:
+        return False
+    if len(normalized) > 6:
+        return False
+    return any(_fuzzy_contains(normalized, target, max_distance=1) for target in ("lapnr", "lapno", "lapn", "lpnr", "lpn"))
 
 
 def looks_like_avg(text: str) -> bool:
-    normalized = re.sub(r"[^a-z]", "", text.lower())
-    return normalized in {"avg", "ava", "av", "avq", "havq"}
+    normalized = _normalize_label_text(text)
+    if not normalized:
+        return False
+    if len(normalized) > 4:
+        return False
+    return _fuzzy_contains(normalized, "avg", max_distance=1)
 
 
 def _parse_header(sheet: ParsedSheet, grid: TableGrid, cells: dict[tuple[int, int], CellOcrResult]) -> None:
@@ -218,3 +226,40 @@ def _choose_lap(candidates: list[tuple[float, float | None, str]]) -> float | No
         return None
     candidates = sorted(candidates, key=lambda item: ((item[1] or 0), -abs(len(item[2]) - 5)), reverse=True)
     return candidates[0][0]
+
+
+def _normalize_label_text(text: str) -> str:
+    text = text.lower()
+    text = text.translate(str.maketrans({"0": "o", "1": "i", "|": "i", "!": "i", "5": "s", "@": "a"}))
+    return re.sub(r"[^a-z]", "", text)
+
+
+def _fuzzy_contains(value: str, target: str, max_distance: int) -> bool:
+    if target in value:
+        return True
+    min_length = max(1, len(target) - max_distance)
+    max_length = len(target) + max_distance
+    for length in range(min_length, max_length + 1):
+        if length > len(value):
+            continue
+        for start in range(0, len(value) - length + 1):
+            if _edit_distance_at_most(value[start : start + length], target, max_distance):
+                return True
+    return False
+
+
+def _edit_distance_at_most(left: str, right: str, limit: int) -> bool:
+    if abs(len(left) - len(right)) > limit:
+        return False
+    previous = list(range(len(right) + 1))
+    for index, left_char in enumerate(left, 1):
+        current = [index]
+        row_min = current[0]
+        for right_index, right_char in enumerate(right, 1):
+            cost = 0 if left_char == right_char else 1
+            current.append(min(previous[right_index] + 1, current[right_index - 1] + 1, previous[right_index - 1] + cost))
+            row_min = min(row_min, current[-1])
+        if row_min > limit:
+            return False
+        previous = current
+    return previous[-1] <= limit

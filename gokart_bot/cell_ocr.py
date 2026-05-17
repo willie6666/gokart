@@ -189,7 +189,7 @@ def _postprocess_ocr_text(text: str, mode: str) -> str:
         return re.sub(r"[^0-9]", "", text)
     if mode == "lap_time":
         return re.sub(r"[^0-9.,:]", "", text)
-    return re.sub(r"[^0-9A-Za-z/:. ]", "", text)
+    return re.sub(r"[^0-9A-Za-z上午下午/:. ：]", "", text)
 
 
 def _normalize_text(text: str) -> str:

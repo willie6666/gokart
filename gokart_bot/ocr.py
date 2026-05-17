@@ -179,17 +179,26 @@ def _refresh_kart_row_cells(grid, header_cells, cell_engine: CellOcrEngine, lap_
         cell = grid.cell(lap_row, col)
         if cell is None:
             continue
-        pad_x = max(1, int(cell.w * 0.02))
-        pad_y = max(1, int(cell.h * 0.04))
-        crop = grid.image[
-            max(0, cell.y + pad_y) : min(grid.image.shape[0], cell.y + cell.h - pad_y),
-            max(0, cell.x + pad_x) : min(grid.image.shape[1], cell.x + cell.w - pad_x),
-        ]
-        if crop.size == 0:
-            continue
-        candidates = cell_engine.recognize_integer_candidates(crop)
-        raw, confidence = cell_engine.recognize_cell(crop, "integer")
-        raw = _choose_integer_candidate(candidates, raw)
+        candidates: list[str] = []
+        confidence = None
+        crops = []
+        for pad_ratio in (0.02, 0.04, 0.06, 0.08, 0.10):
+            pad_x = max(1, int(cell.w * pad_ratio))
+            pad_y = max(1, int(cell.h * 0.04))
+            crop = grid.image[
+                max(0, cell.y + pad_y) : min(grid.image.shape[0], cell.y + cell.h - pad_y),
+                max(0, cell.x + pad_x) : min(grid.image.shape[1], cell.x + cell.w - pad_x),
+            ]
+            if crop.size == 0:
+                continue
+            crops.append(crop)
+            raw_candidate, confidence = cell_engine.recognize_cell(crop, "integer")
+            if raw_candidate.strip():
+                candidates.append(raw_candidate)
+        if not candidates:
+            for crop in crops:
+                candidates.extend(cell_engine.recognize_integer_candidates(crop))
+        raw = _choose_integer_candidate(candidates, "")
         if raw.strip():
             header_cells[(lap_row, col)] = _cell_result(lap_row, col, raw, confidence)
 
@@ -203,11 +212,10 @@ def _cell_result(row: int, col: int, raw: str, confidence: float | None = None):
 def _choose_integer_candidate(candidates: list[str], fallback: str) -> str:
     cleaned_fallback = re.sub(r"[^0-9]", "", fallback)
     all_candidates = candidates + ([cleaned_fallback] if cleaned_fallback else [])
-    short = [value for value in all_candidates if 1 <= len(value) <= 2 and int(value) > 0]
+    short = [re.sub(r"[^0-9]", "", value) for value in all_candidates]
+    short = [value for value in short if 1 <= len(value) <= 2 and int(value) > 0]
     if short:
         return max(set(short), key=lambda value: (short.count(value), len(value)))
-    if cleaned_fallback == "428":
-        return "12"
     return cleaned_fallback or fallback
 
 

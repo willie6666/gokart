@@ -47,7 +47,7 @@ def test_parse_lap_sheet_falls_back_to_kart_numbers() -> None:
     assert [kart.kart_no for kart in parsed.karts] == [3]
 
 
-def test_parse_compact_ocr_date_and_low_confidence_first_kart() -> None:
+def test_parse_compact_ocr_date_keeps_first_kart_eleven() -> None:
     items = [
         item("Date: 2026/518", 90, 20),
         item("Lap/Nr", 20, 100),
@@ -60,7 +60,7 @@ def test_parse_compact_ocr_date_and_low_confidence_first_kart() -> None:
     parsed = parse_lap_sheet(items)
 
     assert parsed.date == "2026/5/8"
-    assert [kart.kart_no for kart in parsed.karts] == [1, 7]
+    assert [kart.kart_no for kart in parsed.karts] == [11, 7]
 
 
 def test_parse_split_header_date_and_time() -> None:

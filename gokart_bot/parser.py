@@ -219,8 +219,6 @@ def _looks_like_lap_label(text: str) -> bool:
 
 
 def _parse_kart_number(item: OcrText, position: int) -> int:
-    if position == 1 and item.text == "11" and item.score < 0.85:
-        return 1
     return int(item.text)
 
 

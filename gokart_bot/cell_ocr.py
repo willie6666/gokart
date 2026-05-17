@@ -12,6 +12,9 @@ from .lap_row_detector import TesseractWord, looks_like_lap_candidate
 from .table_grid import TableGrid
 
 
+TESSERACT_DPI_CONFIG = "--dpi 300 -c user_defined_dpi=300"
+
+
 @dataclass(frozen=True)
 class CellOcrResult:
     row: int
@@ -35,11 +38,7 @@ class CellOcrEngine:
         self.has_tesseract = _has_tesseract()
 
     def recognize_cell(self, image: np.ndarray, mode: str) -> tuple[str, float | None]:
-        ocr_image = make_ocr_image(image)
-        height, width = ocr_image.shape[:2]
-        if height < 48:
-            scale = 48 / max(height, 1)
-            ocr_image = cv2.resize(ocr_image, (max(1, int(width * scale)), 48), interpolation=cv2.INTER_CUBIC)
+        ocr_image = upscale_cell_for_tesseract(image, mode)
         tesseract = _try_tesseract(ocr_image, mode) if self.has_tesseract else None
         if tesseract is not None:
             return tesseract, None
@@ -58,7 +57,7 @@ class CellOcrEngine:
         variants = make_tesseract_variants(upscale_header_for_tesseract(image))
         outputs: list[str] = []
         for variant in variants:
-            for config in ("--oem 1 --psm 6", "--oem 1 --psm 11", "--oem 1 --psm 7"):
+            for config in _with_tesseract_dpi(("--oem 1 --psm 6", "--oem 1 --psm 11", "--oem 1 --psm 7")):
                 try:
                     text = pytesseract.image_to_string(variant, config=config).strip()
                 except Exception:
@@ -75,14 +74,13 @@ class CellOcrEngine:
         except ModuleNotFoundError:
             return []
         candidates: list[str] = []
-        variants = make_tesseract_variants(upscale_header_for_tesseract(image, target_height=180, max_aspect_ratio=4.0))
+        variants = make_tesseract_variants(preprocess_cell_for_tesseract(image, "integer"))
         for variant in variants:
-            for config in (
-                "--oem 1 --psm 7 -c tessedit_char_whitelist=0123456789",
-                "--oem 1 --psm 8 -c tessedit_char_whitelist=0123456789",
+            for config in _with_tesseract_dpi((
                 "--oem 1 --psm 10 -c tessedit_char_whitelist=0123456789",
+                "--oem 1 --psm 8 -c tessedit_char_whitelist=0123456789",
                 "--oem 1 --psm 13 -c tessedit_char_whitelist=0123456789",
-            ):
+            )):
                 try:
                     text = pytesseract.image_to_string(variant, config=config).strip()
                 except Exception:
@@ -180,7 +178,8 @@ def _try_tesseract(image: np.ndarray, mode: str) -> str | None:
         "lap_time": "0123456789.,:Il|Oo",
         "text": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/:. ",
     }.get(mode, "")
-    config = "--oem 1 --psm 7"
+    psm = 10 if mode == "integer" else 7
+    config = f"{TESSERACT_DPI_CONFIG} --oem 1 --psm {psm}"
     if whitelist:
         config += f" -c tessedit_char_whitelist={whitelist}"
     try:
@@ -195,6 +194,62 @@ def upscale_for_tesseract(image: np.ndarray) -> tuple[np.ndarray, float]:
         scale = 900 / max(height, 1)
         return cv2.resize(image, (max(1, int(width * scale)), 900), interpolation=cv2.INTER_CUBIC), scale
     return image, 1.0
+
+
+def upscale_cell_for_tesseract(image: np.ndarray, mode: str) -> np.ndarray:
+    return preprocess_cell_for_tesseract(image, mode)
+
+
+def preprocess_cell_for_tesseract(image: np.ndarray, mode: str) -> np.ndarray:
+    target_height = {"integer": 180, "lap_time": 140, "text": 120}.get(mode, 140)
+    if mode == "text":
+        return _upscale_enhanced_cell(image, target_height)
+    cleaned = _remove_cell_borders(image)
+    ocr_image = make_ocr_image(cleaned)
+    height, width = ocr_image.shape[:2]
+    scale = min(max(target_height / max(height, 1), 2.0), 4.0)
+    return cv2.resize(
+        ocr_image,
+        (max(1, int(width * scale)), max(1, int(height * scale))),
+        interpolation=cv2.INTER_CUBIC,
+    )
+
+
+def _upscale_enhanced_cell(image: np.ndarray, target_height: int) -> np.ndarray:
+    ocr_image = make_ocr_image(image)
+    height, width = ocr_image.shape[:2]
+    if height >= target_height:
+        return ocr_image
+    scale = min(max(target_height / max(height, 1), 2.0), 4.0)
+    return cv2.resize(
+        ocr_image,
+        (max(1, int(width * scale)), max(1, int(height * scale))),
+        interpolation=cv2.INTER_CUBIC,
+    )
+
+
+def _remove_cell_borders(image: np.ndarray) -> np.ndarray:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
+    if gray.size == 0:
+        return gray
+    result = gray.copy()
+    height, width = result.shape[:2]
+    binary = cv2.adaptiveThreshold(result, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31, 8)
+    edge_margin_x = max(2, int(width * 0.10))
+    edge_margin_y = max(2, int(height * 0.10))
+    for x in range(edge_margin_x):
+        if np.count_nonzero(binary[:, x]) / max(height, 1) >= 0.70:
+            result[:, x] = 255
+    for x in range(max(0, width - edge_margin_x), width):
+        if np.count_nonzero(binary[:, x]) / max(height, 1) >= 0.70:
+            result[:, x] = 255
+    for y in range(edge_margin_y):
+        if np.count_nonzero(binary[y, :]) / max(width, 1) >= 0.70:
+            result[y, :] = 255
+    for y in range(max(0, height - edge_margin_y), height):
+        if np.count_nonzero(binary[y, :]) / max(width, 1) >= 0.70:
+            result[y, :] = 255
+    return result
 
 
 def upscale_header_for_tesseract(image: np.ndarray, target_height: int = 260, max_aspect_ratio: float = 8.0) -> np.ndarray:
@@ -280,6 +335,7 @@ def _tesseract_data_words(image: np.ndarray, mode: str) -> list[TesseractWord]:
     configs = ["--oem 1 --psm 6", "--oem 1 --psm 11"] if mode in {"lap_time", "lap_index"} else ["--oem 1 --psm 7"]
     if whitelist:
         configs = [f"{config} -c tessedit_char_whitelist={whitelist}" for config in configs]
+    configs = _with_tesseract_dpi(configs)
     words: list[TesseractWord] = []
     for config in configs:
         try:
@@ -314,6 +370,10 @@ def _looks_like_lap_index(text: str) -> bool:
         return False
     value = int(stripped)
     return 1 <= value <= 80
+
+
+def _with_tesseract_dpi(configs) -> list[str]:
+    return [f"{TESSERACT_DPI_CONFIG} {config}" for config in configs]
 
 
 def _has_tesseract() -> bool:

@@ -7,7 +7,7 @@ import cv2
 from .cell_ocr import CellOcrEngine, preprocess_image
 from .grid_parser import parse_grid_sheet, parse_grid_sheet_with_virtual_rows
 from .lap_row_detector import detect_virtual_lap_rows
-from .ocr_debug import write_cell_ocr, write_debug_parsed, write_parsed_overlay, write_tesseract_words, write_virtual_rows_overlay
+from .ocr_debug import write_cell_ocr, write_debug_parsed, write_ocr_words, write_parsed_overlay, write_virtual_rows_overlay
 from .parser import ParsedSheet
 from .table_grid import crop_column_region, extract_table_grid
 
@@ -65,7 +65,7 @@ class OcrEngine:
         virtual_rows = detect_virtual_lap_rows(all_words, float(y_start), int(y_end or grid.image.shape[0]))
         parsed = parse_grid_sheet_with_virtual_rows(grid, header_cells, column_words)
         write_cell_ocr(header_cells, debug_dir)
-        write_tesseract_words(column_words, virtual_rows, debug_dir)
+        write_ocr_words(column_words, virtual_rows, debug_dir)
         write_virtual_rows_overlay(grid, column_words, virtual_rows, debug_dir)
         write_debug_parsed(parsed, debug_dir)
         write_parsed_overlay(grid, parsed, debug_dir)

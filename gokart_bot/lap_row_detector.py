@@ -7,7 +7,7 @@ from typing import Literal
 
 
 @dataclass(frozen=True)
-class TesseractWord:
+class OcrWord:
     text: str
     confidence: float | None
     x: float
@@ -34,7 +34,7 @@ class VirtualLapRow:
 
 
 def detect_virtual_lap_rows(
-    words: list[TesseractWord],
+    words: list[OcrWord],
     lap_nr_y: float,
     table_height: int,
     min_y_gap: float = 8.0,
@@ -109,7 +109,7 @@ def _rows_from_centers(
     return rows
 
 
-def infer_lap_count(words: list[TesseractWord], lap_nr_y: float, max_laps: int = 80) -> int | None:
+def infer_lap_count(words: list[OcrWord], lap_nr_y: float, max_laps: int = 80) -> int | None:
     values: list[int] = []
     for word in words:
         if word.center_y <= lap_nr_y:

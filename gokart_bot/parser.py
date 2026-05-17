@@ -10,8 +10,9 @@ from .models import KartResult
 DATE_RE = re.compile(r"(?:Date\s*[:：]?\s*)?(20\d{2}\s*/\s*\d{1,2}\s*/\s*\d{1,2})", re.IGNORECASE)
 COMPACT_DATE_RE = re.compile(r"Date\s*[:：]?\s*(20\d{2})\s*/\s*(\d{2,4})", re.IGNORECASE)
 HEAT_RE = re.compile(r"Heat\s*[:：]?\s*(?:Heat\s*)?(\d+)", re.IGNORECASE)
-TIME_RE = re.compile(r"(?:Time|Printed)\s*[:：]?\s*(?:上午|下午|AM|PM)?\s*(\d{1,2}:\d{2}(?::\d{2})?)", re.IGNORECASE)
-LOOSE_TIME_RE = re.compile(r"(?:Time|Printed).{0,30}?(\d{1,2}:\d{2})(?:\s+(\d{2}))?", re.IGNORECASE)
+TIME_RE = re.compile(r"(?:Time|Printed)\s*[:：]?\s*(?:上午|下午|AM|PM)?\s*(\d{1,2}[:.]\d{2}(?:[:.]\d{2})?)", re.IGNORECASE)
+LOOSE_TIME_RE = re.compile(r"(?:Time|Printed).{0,30}?(\d{1,2}[:.]\d{2})(?:[\s.]+(\d{2}))?", re.IGNORECASE)
+ANY_TIME_RE = re.compile(r"\b(\d{1,2}[:.]\d{2}[:.]\d{2})\b")
 
 
 @dataclass
@@ -51,13 +52,18 @@ def _find_time(text: str) -> str | None:
     best: str | None = None
     match = TIME_RE.search(text)
     if match:
-        best = match.group(1)
+        best = match.group(1).replace(".", ":")
     match = LOOSE_TIME_RE.search(text)
     if match:
         value, seconds = match.groups()
+        value = value.replace(".", ":")
         candidate = f"{value}:{seconds}" if seconds else value
         if best is None or len(candidate) > len(best):
             best = candidate
+    if best is None:
+        match = ANY_TIME_RE.search(text)
+        if match:
+            best = match.group(1).replace(".", ":")
     return best
 
 

@@ -1,5 +1,5 @@
 from gokart_bot.lap_row_detector import (
-    TesseractWord,
+    OcrWord,
     detect_virtual_lap_rows,
     fill_missing_virtual_rows,
     find_virtual_row,
@@ -8,8 +8,8 @@ from gokart_bot.lap_row_detector import (
 )
 
 
-def word(text: str, y: float) -> TesseractWord:
-    return TesseractWord(text=text, confidence=90.0, x=10.0, y=y, w=30.0, h=10.0)
+def word(text: str, y: float) -> OcrWord:
+    return OcrWord(text=text, confidence=90.0, x=10.0, y=y, w=30.0, h=10.0)
 
 
 def test_detect_virtual_lap_rows_clusters_ocr_y_positions() -> None:

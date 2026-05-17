@@ -6,7 +6,7 @@ from pathlib import Path
 import cv2
 
 from .cell_ocr import CellOcrResult, normalize_lap_text, parse_lap_time
-from .lap_row_detector import TesseractWord, VirtualLapRow, find_virtual_row
+from .lap_row_detector import OcrWord, VirtualLapRow, find_virtual_row
 from .parser import ParsedSheet
 from .table_grid import TableGrid
 
@@ -64,8 +64,8 @@ def write_parsed_overlay(grid: TableGrid, parsed: ParsedSheet, debug_dir: Path |
     cv2.imwrite(str(debug_dir / "grid_overlay.png"), image)
 
 
-def write_tesseract_words(
-    column_words: dict[int, list[TesseractWord]],
+def write_ocr_words(
+    column_words: dict[int, list[OcrWord]],
     rows: list[VirtualLapRow],
     debug_dir: Path | None,
 ) -> None:
@@ -88,14 +88,14 @@ def write_tesseract_words(
                     "h": round(word.h, 2),
                 }
             )
-    with (debug_dir / "tesseract_words.json").open("w", encoding="utf-8") as file:
+    with (debug_dir / "ocr_words.json").open("w", encoding="utf-8") as file:
         json.dump(payload, file, ensure_ascii=False, indent=2)
         file.write("\n")
 
 
 def write_virtual_rows_overlay(
     grid: TableGrid,
-    column_words: dict[int, list[TesseractWord]],
+    column_words: dict[int, list[OcrWord]],
     rows: list[VirtualLapRow],
     debug_dir: Path | None,
 ) -> None:

@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 from pathlib import Path
+import re
 
 import cv2
 import numpy as np
 
 from .image_preprocess import make_ocr_image
-from .lap_row_detector import TesseractWord, looks_like_lap_candidate
+from .lap_row_detector import OcrWord, looks_like_lap_candidate
 from .table_grid import TableGrid
 
 
-TESSERACT_DPI = "--dpi 300 -c user_defined_dpi=300"
+ALLOWLISTS = {
+    "integer": "0123456789",
+    "lap_index": "0123456789",
+    "lap_time": "0123456789.,:",
+    "text": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/:. ",
+}
 
 
 @dataclass(frozen=True)
@@ -35,41 +40,45 @@ class CellOcrResult:
 
 class CellOcrEngine:
     def __init__(self) -> None:
-        self.has_tesseract = _has_tesseract()
         self._easyocr = None
 
     def recognize_cell(self, image: np.ndarray, mode: str) -> tuple[str, float | None]:
-        if not self.has_tesseract:
-            return "", None
         if mode == "integer":
-            result = _tesseract_string(_preprocess(image, mode, enhanced=False), mode)
-            if not result:
-                result = _tesseract_string(_preprocess(image, mode, enhanced=True), mode)
-            return (result, None) if result else ("", None)
-        ocr_image = _preprocess(image, mode)
-        result = _tesseract_string(ocr_image, mode)
-        return (result, None) if result else ("", None)
+            raw, confidence = self._recognize_box(_preprocess(image, mode, enhanced=False), mode)
+            raw = _postprocess_easyocr_text(raw, mode)
+            if not raw:
+                raw, confidence = self._recognize_box(_preprocess(image, mode, enhanced=True), mode)
+                raw = _postprocess_easyocr_text(raw, mode)
+            return raw, confidence if raw else None
+
+        raw, confidence = self._recognize_box(_preprocess(image, mode), mode)
+        raw = _postprocess_easyocr_text(raw, mode)
+        return raw, confidence if raw else None
 
     def recognize_header_cells(self, grid: TableGrid, debug_dir: Path | None = None) -> dict[tuple[int, int], CellOcrResult]:
-        return self._recognize_grid_with_tesseract(grid, debug_dir)
+        return self._recognize_grid(grid, debug_dir)
 
     def recognize_text_region(self, image: np.ndarray) -> str:
-        if not self.has_tesseract:
-            return ""
+        reader = self._get_easyocr()
         ocr_image = _upscale(image, target_height=260)
-        return _tesseract_string(ocr_image, "text") or ""
+        results = reader.readtext(
+            ocr_image,
+            detail=1,
+            allowlist=ALLOWLISTS["text"],
+            paragraph=False,
+        )
+        words: list[tuple[float, float, str]] = []
+        for box, text, _confidence in results:
+            xs = [float(point[0]) for point in box]
+            ys = [float(point[1]) for point in box]
+            cleaned = _postprocess_easyocr_text(str(text), "text")
+            if cleaned:
+                words.append((min(ys), min(xs), cleaned))
+        return " ".join(text for _, _, text in sorted(words))
 
-    def recognize_integer_candidates(self, image: np.ndarray) -> list[str]:
-        if not self.has_tesseract:
-            return []
-        ocr_image = _preprocess(image, "integer")
-        result = _tesseract_string(ocr_image, "integer")
-        digits = re.sub(r"[^0-9]", "", result)
-        return [digits] if digits else []
-
-    def recognize_column_words(self, image: np.ndarray, mode: str = "lap_time") -> list[TesseractWord]:
-        if mode == "lap_index":
-            return self._tesseract_column_words(image, mode)
+    def recognize_column_words(self, image: np.ndarray, mode: str = "lap_time") -> list[OcrWord]:
+        if mode not in {"lap_index", "lap_time"}:
+            raise ValueError(f"Unsupported column OCR mode: {mode}")
         reader = self._get_easyocr()
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
         scale = 4.0
@@ -78,26 +87,9 @@ class CellOcrEngine:
         h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (int(25 * scale), 1))
         horizontal_lines = cv2.morphologyEx(bw, cv2.MORPH_OPEN, h_kernel)
         bw_clean = cv2.subtract(bw, horizontal_lines)
-        row_projection = (bw_clean > 0).sum(axis=1)
-        row_mask = row_projection > 3
-        ys = np.where(row_mask)[0]
-        if len(ys) == 0:
-            return []
-        line_ranges: list[tuple[int, int]] = []
-        start = int(ys[0])
-        prev = int(ys[0])
-        for yi in ys[1:]:
-            y = int(yi)
-            if y - prev <= 1:
-                prev = y
-            else:
-                if prev - start > int(5 * scale):
-                    line_ranges.append((start, prev))
-                start = y
-                prev = y
-        if prev - start > int(5 * scale):
-            line_ranges.append((start, prev))
-        words: list[TesseractWord] = []
+        line_ranges = _line_ranges_from_projection(bw_clean, scale)
+
+        words: list[OcrWord] = []
         for y1, y2 in line_ranges:
             sub = bw_clean[y1 : y2 + 1, :]
             col_projection = (sub > 0).sum(axis=0)
@@ -119,26 +111,23 @@ class CellOcrEngine:
                 horizontal_list=[[0, w, 0, h]],
                 free_list=[],
                 detail=1,
-                allowlist="0123456789.",
+                allowlist=ALLOWLISTS[mode],
                 decoder="greedy",
                 paragraph=False,
             )
-            if rec:
-                raw_text = str(rec[0][1]).strip()
-                confidence = float(rec[0][2])
-            else:
+            if not rec:
                 continue
-            if not looks_like_lap_candidate(raw_text):
-                if len(raw_text) > 4 and raw_text[0] in "1":
-                    stripped = raw_text[1:]
-                    if looks_like_lap_candidate(stripped):
-                        raw_text = stripped
-                    else:
-                        continue
+            raw_text = _postprocess_easyocr_text(str(rec[0][1]).strip(), mode)
+            confidence = float(rec[0][2])
+            if mode == "lap_time" and not looks_like_lap_candidate(raw_text):
+                if len(raw_text) > 4 and raw_text[0] == "1" and looks_like_lap_candidate(raw_text[1:]):
+                    raw_text = raw_text[1:]
                 else:
                     continue
+            if mode == "lap_index" and not _looks_like_lap_index(raw_text):
+                continue
             words.append(
-                TesseractWord(
+                OcrWord(
                     text=raw_text,
                     confidence=confidence,
                     x=float(x1) / scale,
@@ -149,40 +138,33 @@ class CellOcrEngine:
             )
         return sorted(words, key=lambda item: (item.center_y, item.center_x))
 
-    def _tesseract_column_words(self, image: np.ndarray, mode: str) -> list[TesseractWord]:
-        import pytesseract
-        from pytesseract import Output
-        ocr_image, scale = _upscale_for_ocr(image)
-        config = _tesseract_config(mode)
-        try:
-            data = pytesseract.image_to_data(ocr_image, config=config, output_type=Output.DICT)
-        except Exception:
-            return []
-        words: list[TesseractWord] = []
-        for index, text in enumerate(data.get("text", [])):
-            text = str(text).strip()
-            if not text:
-                continue
-            try:
-                conf = float(data["conf"][index])
-            except (ValueError, TypeError):
-                conf = -1.0
-            if mode == "lap_index" and not _looks_like_lap_index(text):
-                continue
-            x = float(data["left"][index]) / scale
-            y = float(data["top"][index]) / scale
-            w = float(data["width"][index]) / scale
-            h = float(data["height"][index]) / scale
-            words.append(TesseractWord(text=text, confidence=conf if conf >= 0 else None, x=x, y=y, w=w, h=h))
-        return words
+    def _recognize_box(self, image: np.ndarray, mode: str) -> tuple[str, float | None]:
+        reader = self._get_easyocr()
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
+        h, w = gray.shape[:2]
+        if h == 0 or w == 0:
+            return "", None
+        results = reader.recognize(
+            gray,
+            horizontal_list=[[0, w, 0, h]],
+            free_list=[],
+            detail=1,
+            allowlist=ALLOWLISTS.get(mode, ALLOWLISTS["text"]),
+            decoder="greedy",
+            paragraph=False,
+        )
+        if not results:
+            return "", None
+        return str(results[0][1]).strip(), float(results[0][2])
 
     def _get_easyocr(self):
         if self._easyocr is None:
             import easyocr
-            self._easyocr = easyocr.Reader(['en'], gpu=False)
+
+            self._easyocr = easyocr.Reader(["en"], gpu=False)
         return self._easyocr
 
-    def _recognize_grid_with_tesseract(self, grid: TableGrid, debug_dir: Path | None = None) -> dict[tuple[int, int], CellOcrResult]:
+    def _recognize_grid(self, grid: TableGrid, debug_dir: Path | None = None) -> dict[tuple[int, int], CellOcrResult]:
         cells_dir = debug_dir / "cells" if debug_dir else None
         if cells_dir:
             cells_dir.mkdir(parents=True, exist_ok=True)
@@ -246,13 +228,12 @@ def parse_lap_time(text: str) -> float | None:
 
 
 def preprocess_image(image: np.ndarray, mode: str) -> np.ndarray:
-    """Preprocess an image for Tesseract OCR: clean edges, enhance, upscale."""
+    """Preprocess an image for debug and EasyOCR input inspection."""
     return _preprocess(image, mode, enhanced=True)
 
 
 def _preprocess(image: np.ndarray, mode: str, enhanced: bool = True) -> np.ndarray:
-    """Single-pass preprocessing: clean edges, enhance, upscale."""
-    target_height = {"integer": 180, "lap_time": 140, "text": 120}.get(mode, 140)
+    target_height = {"integer": 180, "lap_index": 140, "lap_time": 140, "text": 120}.get(mode, 140)
     if mode == "text":
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
         ocr = make_ocr_image(gray)
@@ -265,45 +246,10 @@ def _preprocess(image: np.ndarray, mode: str, enhanced: bool = True) -> np.ndarr
     return _resize_min(ocr, target_height)
 
 
-def _tesseract_string(image: np.ndarray, mode: str) -> str:
-    import pytesseract
-
-    config = _tesseract_config(mode)
-    try:
-        return pytesseract.image_to_string(image, config=config).strip()
-    except Exception:
-        return ""
-
-
-def _tesseract_config(mode: str) -> str:
-    whitelist = {
-        "integer": "0123456789",
-        "lap_index": "0123456789",
-        "lap_time": "0123456789.,:Il|Oo",
-        "text": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/:. ",
-    }.get(mode, "")
-    psm = 10 if mode == "integer" else 6
-    parts = [TESSERACT_DPI, f"--oem 1 --psm {psm}"]
-    if whitelist:
-        parts.append(f"-c tessedit_char_whitelist={whitelist}")
-    return " ".join(parts)
-
-
 def _upscale(image: np.ndarray, target_height: int = 260) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
     ocr = make_ocr_image(gray)
     return _resize_min(ocr, target_height)
-
-
-def _upscale_for_ocr(image: np.ndarray) -> tuple[np.ndarray, float]:
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
-    ocr = make_ocr_image(gray)
-    height = ocr.shape[0]
-    if height < 900:
-        scale = 900 / max(height, 1)
-        new_w = max(1, int(ocr.shape[1] * scale))
-        return cv2.resize(ocr, (new_w, 900), interpolation=cv2.INTER_CUBIC), scale
-    return ocr, 1.0
 
 
 def _resize_min(image: np.ndarray, target_height: int) -> np.ndarray:
@@ -338,6 +284,29 @@ def _remove_cell_edges(image: np.ndarray) -> np.ndarray:
     return result
 
 
+def _line_ranges_from_projection(binary: np.ndarray, scale: float) -> list[tuple[int, int]]:
+    row_projection = (binary > 0).sum(axis=1)
+    row_mask = row_projection > 3
+    ys = np.where(row_mask)[0]
+    if len(ys) == 0:
+        return []
+    ranges: list[tuple[int, int]] = []
+    start = int(ys[0])
+    prev = int(ys[0])
+    for yi in ys[1:]:
+        y = int(yi)
+        if y - prev <= 1:
+            prev = y
+        else:
+            if prev - start > int(5 * scale):
+                ranges.append((start, prev))
+            start = y
+            prev = y
+    if prev - start > int(5 * scale):
+        ranges.append((start, prev))
+    return ranges
+
+
 def _looks_like_lap_index(text: str) -> bool:
     stripped = re.sub(r"[^0-9]", "", text)
     if not stripped:
@@ -346,22 +315,21 @@ def _looks_like_lap_index(text: str) -> bool:
     return 1 <= value <= 80
 
 
-def _has_tesseract() -> bool:
-    try:
-        import pytesseract
-
-        pytesseract.get_tesseract_version()
-    except Exception:
-        return False
-    return True
-
-
 def _mode_for_cell(row: int, col: int) -> str:
     if row <= 2 or col <= 1:
         return "text"
     if row <= 4:
         return "integer"
     return "lap_time"
+
+
+def _postprocess_easyocr_text(text: str, mode: str) -> str:
+    text = " ".join(text.strip().split())
+    if mode in {"integer", "lap_index"}:
+        return re.sub(r"[^0-9]", "", text)
+    if mode == "lap_time":
+        return re.sub(r"[^0-9.,:]", "", text)
+    return re.sub(r"[^0-9A-Za-z/:. ]", "", text)
 
 
 def _normalize_text(text: str) -> str:

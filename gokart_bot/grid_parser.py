@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from .cell_ocr import CellOcrResult, normalize_kart_no, normalize_lap_text, parse_lap_time
-from .lap_row_detector import TesseractWord, detect_virtual_lap_rows, fill_missing_virtual_rows, find_virtual_row, infer_lap_count
+from .lap_row_detector import OcrWord, detect_virtual_lap_rows, fill_missing_virtual_rows, find_virtual_row, infer_lap_count
 from .models import KartResult
 from .parser import ParsedSheet, _find_date, _find_heat, _find_time
 from .table_grid import TableGrid
@@ -59,7 +59,7 @@ def parse_grid_sheet(
 def parse_grid_sheet_with_virtual_rows(
     grid: TableGrid,
     header_cells: dict[tuple[int, int], CellOcrResult],
-    column_words: dict[int, list[TesseractWord]],
+    column_words: dict[int, list[OcrWord]],
 ) -> ParsedSheet:
     sheet = ParsedSheet()
     sheet.warnings.extend(grid.warnings)
@@ -132,7 +132,7 @@ def parse_grid_sheet_with_virtual_rows(
 
 def looks_like_lap_nr(text: str) -> bool:
     normalized = re.sub(r"[^a-z]", "", text.lower())
-    return normalized in {"lapnr", "lpnr", "lapn", "lpn", "lapno", "lapnumber", "lap"}
+    return normalized in {"lapnr", "lapinr", "laplnr", "lpnr", "lapn", "lpn", "lapno", "lapnumber", "lap"}
 
 
 def looks_like_avg(text: str) -> bool:

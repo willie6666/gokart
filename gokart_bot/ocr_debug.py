@@ -5,7 +5,7 @@ from pathlib import Path
 
 import cv2
 
-from .cell_ocr import CellOcrResult
+from .cell_ocr import CellOcrResult, normalize_lap_text, parse_lap_time
 from .lap_row_detector import TesseractWord, VirtualLapRow, find_virtual_row
 from .parser import ParsedSheet
 from .table_grid import TableGrid
@@ -79,6 +79,8 @@ def write_tesseract_words(
                     "col": col,
                     "virtual_row": find_virtual_row(rows, word.center_y),
                     "text": word.text,
+                    "normalized": normalize_lap_text(word.text),
+                    "lap": parse_lap_time(word.text),
                     "confidence": word.confidence,
                     "x": round(word.x, 2),
                     "y": round(word.y, 2),

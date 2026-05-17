@@ -96,13 +96,16 @@ class CellOcrEngine:
         if not self.has_tesseract:
             raise RuntimeError("Tesseract is required for virtual-row column OCR")
         words: list[TesseractWord] = []
-        ocr_image, scale = upscale_for_tesseract(image)
-        for variant in make_tesseract_variants(ocr_image):
-            words.extend(_scale_words(_tesseract_data_words(variant, mode), 1 / scale))
+        for crop, y_offset in _column_ocr_passes(image):
+            ocr_image, scale = upscale_for_tesseract(crop)
+            for variant in make_tesseract_variants(ocr_image):
+                words.extend(_offset_words(_scale_words(_tesseract_data_words(variant, mode), 1 / scale), y_offset))
 
         deduped: dict[tuple[str, int, int], TesseractWord] = {}
         for word in words:
             if mode == "lap_time" and not looks_like_lap_candidate(word.text):
+                continue
+            if mode == "lap_index" and not _looks_like_lap_index(word.text):
                 continue
             key = (normalize_lap_text(word.text) if mode == "lap_time" else word.text.strip(), round(word.center_x / 4), round(word.center_y / 4))
             current = deduped.get(key)
@@ -162,7 +165,7 @@ def parse_lap_time(text: str) -> float | None:
     if not re.fullmatch(r"\d{1,2}\.\d{2,3}", normalized):
         return None
     value = round(float(normalized), 3)
-    if value < 10.0 or value > 90.0:
+    if value < 15.0 or value > 90.0:
         return None
     return value
 
@@ -210,6 +213,19 @@ def upscale_header_for_tesseract(image: np.ndarray, target_height: int = 260, ma
     return cv2.copyMakeBorder(resized, pad_top, pad_bottom, 0, 0, cv2.BORDER_CONSTANT, value=(255, 255, 255))
 
 
+def _column_ocr_passes(image: np.ndarray) -> list[tuple[np.ndarray, float]]:
+    height = image.shape[0]
+    if height < 160:
+        return [(image, 0.0)]
+    midpoint = height // 2
+    overlap = min(max(height // 12, 24), 80)
+    return [
+        (image, 0.0),
+        (image[: min(height, midpoint + overlap)], 0.0),
+        (image[max(0, midpoint - overlap) :], float(max(0, midpoint - overlap))),
+    ]
+
+
 def _scale_words(words: list[TesseractWord], scale: float) -> list[TesseractWord]:
     if scale == 1.0:
         return words
@@ -221,6 +237,22 @@ def _scale_words(words: list[TesseractWord], scale: float) -> list[TesseractWord
             y=word.y * scale,
             w=word.w * scale,
             h=word.h * scale,
+        )
+        for word in words
+    ]
+
+
+def _offset_words(words: list[TesseractWord], y_offset: float) -> list[TesseractWord]:
+    if y_offset == 0:
+        return words
+    return [
+        TesseractWord(
+            text=word.text,
+            confidence=word.confidence,
+            x=word.x,
+            y=word.y + y_offset,
+            w=word.w,
+            h=word.h,
         )
         for word in words
     ]
@@ -241,10 +273,11 @@ def _tesseract_data_words(image: np.ndarray, mode: str) -> list[TesseractWord]:
         return []
     whitelist = {
         "integer": "0123456789",
+        "lap_index": "0123456789",
         "lap_time": "0123456789.,:Il|Oo",
         "text": "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz/:. ",
     }.get(mode, "")
-    configs = ["--oem 1 --psm 6", "--oem 1 --psm 11"] if mode == "lap_time" else ["--oem 1 --psm 7"]
+    configs = ["--oem 1 --psm 6", "--oem 1 --psm 11"] if mode in {"lap_time", "lap_index"} else ["--oem 1 --psm 7"]
     if whitelist:
         configs = [f"{config} -c tessedit_char_whitelist={whitelist}" for config in configs]
     words: list[TesseractWord] = []
@@ -273,6 +306,14 @@ def _tesseract_data_words(image: np.ndarray, mode: str) -> list[TesseractWord]:
                 )
             )
     return words
+
+
+def _looks_like_lap_index(text: str) -> bool:
+    stripped = re.sub(r"[^0-9]", "", text)
+    if not stripped:
+        return False
+    value = int(stripped)
+    return 1 <= value <= 80
 
 
 def _has_tesseract() -> bool:

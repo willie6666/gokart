@@ -68,20 +68,19 @@ def test_parse_grid_sheet_ignores_single_lap_noise_columns() -> None:
     assert [kart.kart_no for kart in parsed.karts] == [3]
 
 
-def test_parse_grid_sheet_drops_obvious_lap_outliers() -> None:
+def test_parse_grid_sheet_keeps_slow_laps() -> None:
     cells = {
         (2, 1): cell(2, 1, "Lap/Nr"),
         (2, 2): cell(2, 2, "5"),
         (3, 2): cell(3, 2, "24.63"),
         (4, 2): cell(4, 2, "23.29"),
         (5, 2): cell(5, 2, "22.88"),
-        (6, 2): cell(6, 2, "22.47"),
-        (7, 2): cell(7, 2, "70.05"),
+        (6, 2): cell(6, 2, "70.05"),
     }
 
     parsed = parse_grid_sheet(grid(), cells)
 
-    assert parsed.karts[0].laps == [24.63, 23.29, 22.88, 22.47]
+    assert parsed.karts[0].laps == [24.63, 23.29, 22.88, 70.05]
 
 
 def test_parse_grid_sheet_extracts_multiple_laps_from_merged_cell() -> None:
@@ -99,7 +98,7 @@ def test_parse_grid_sheet_extracts_multiple_laps_from_merged_cell() -> None:
     assert parsed.karts[0].laps == [24.63, 22.17, 24.01, 23.67, 26.03]
 
 
-def test_first_kart_eleven_before_two_is_corrected_to_one() -> None:
+def test_first_kart_eleven_before_two_is_not_auto_corrected() -> None:
     cells = {
         (2, 1): cell(2, 1, "Lap/Nr"),
         (2, 2): cell(2, 2, "11"),
@@ -112,4 +111,4 @@ def test_first_kart_eleven_before_two_is_corrected_to_one() -> None:
 
     parsed = parse_grid_sheet(grid(), cells)
 
-    assert [kart.kart_no for kart in parsed.karts] == [1, 2]
+    assert [kart.kart_no for kart in parsed.karts] == [11, 2]

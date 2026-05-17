@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from statistics import mean
+from statistics import mean, median
 from typing import Literal
 
 
@@ -30,7 +30,7 @@ class VirtualLapRow:
     center_y: float
     top: float
     bottom: float
-    source: Literal["ocr_cluster", "estimated"]
+    source: Literal["ocr_cluster", "filled"]
 
 
 def detect_virtual_lap_rows(
@@ -38,19 +38,61 @@ def detect_virtual_lap_rows(
     lap_nr_y: float,
     table_height: int,
     min_y_gap: float = 8.0,
-    bottom_y: float | None = None,
-    expected_count: int | None = None,
 ) -> list[VirtualLapRow]:
-    if expected_count and expected_count >= 2:
-        return _estimated_rows(lap_nr_y, bottom_y or float(table_height), expected_count)
-
     candidates = [word.center_y for word in words if word.center_y > lap_nr_y and _looks_like_row_anchor(word.text)]
     clusters = cluster_y_positions(candidates, min_y_gap)
     centers = [mean(cluster) for cluster in clusters]
     if not centers:
         return []
 
+    return _rows_from_centers(centers, lap_nr_y, float(table_height), source="ocr_cluster")
+
+
+def fill_missing_virtual_rows(
+    rows: list[VirtualLapRow],
+    expected_count: int | None,
+    lap_nr_y: float,
+    bottom_y: float | None,
+    table_height: int,
+) -> list[VirtualLapRow]:
+    if expected_count is None or expected_count <= len(rows) or len(rows) < 2:
+        return rows
+    centers = [row.center_y for row in rows]
+    gaps = [centers[index + 1] - centers[index] for index in range(len(centers) - 1)]
+    pitch = median(gaps) if gaps else 0
+    if pitch <= 0:
+        return rows
+
+    filled_centers = list(centers)
+    for index, gap in reversed(list(enumerate(gaps))):
+        missing = int(round(gap / pitch)) - 1
+        if gap <= pitch * 1.6 or missing <= 0:
+            continue
+        missing = min(missing, expected_count - len(filled_centers))
+        for offset in range(missing, 0, -1):
+            filled_centers.insert(index + 1, centers[index] + pitch * offset)
+        if len(filled_centers) >= expected_count:
+            break
+
+    limit = bottom_y or float(table_height)
+    while len(filled_centers) < expected_count:
+        candidate = filled_centers[-1] + pitch
+        if candidate >= limit:
+            break
+        filled_centers.append(candidate)
+
+    return _rows_from_centers(filled_centers, lap_nr_y, limit, source="filled", original_centers=set(centers))
+
+
+def _rows_from_centers(
+    centers: list[float],
+    lap_nr_y: float,
+    table_height: float,
+    source: Literal["ocr_cluster", "filled"],
+    original_centers: set[float] | None = None,
+) -> list[VirtualLapRow]:
     rows: list[VirtualLapRow] = []
+    centers = sorted(centers)
     for index, center in enumerate(centers):
         if index == 0:
             gap = centers[1] - center if len(centers) > 1 else 24.0
@@ -62,7 +104,8 @@ def detect_virtual_lap_rows(
         else:
             gap = center - centers[index - 1] if index > 0 else 24.0
             bottom = min(float(table_height), center + gap / 2)
-        rows.append(VirtualLapRow(index=index + 1, center_y=center, top=top, bottom=bottom, source="ocr_cluster"))
+        row_source = "ocr_cluster" if original_centers is not None and center in original_centers else source
+        rows.append(VirtualLapRow(index=index + 1, center_y=center, top=top, bottom=bottom, source=row_source))
     return rows
 
 
@@ -98,18 +141,6 @@ def find_virtual_row(rows: list[VirtualLapRow], y: float) -> int | None:
     return None
 
 
-def _estimated_rows(top_y: float, bottom_y: float, count: int) -> list[VirtualLapRow]:
-    if bottom_y <= top_y:
-        return []
-    step = (bottom_y - top_y) / count
-    rows = []
-    for index in range(count):
-        top = top_y + index * step
-        bottom = top_y + (index + 1) * step
-        rows.append(VirtualLapRow(index=index + 1, center_y=(top + bottom) / 2, top=top, bottom=bottom, source="estimated"))
-    return rows
-
-
 def looks_like_lap_candidate(text: str) -> bool:
     normalized = _normalize_lap_text(text)
     if re.fullmatch(r"\d{4,5}", normalized):
@@ -117,7 +148,7 @@ def looks_like_lap_candidate(text: str) -> bool:
     if not re.fullmatch(r"\d{1,2}\.\d{2,3}", normalized):
         return False
     value = float(normalized)
-    return 10.0 <= value <= 90.0
+    return 15.0 <= value <= 90.0
 
 
 def _looks_like_row_anchor(text: str) -> bool:

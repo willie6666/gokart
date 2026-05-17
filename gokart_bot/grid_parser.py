@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from .cell_ocr import CellOcrResult, normalize_kart_no, normalize_lap_text, parse_lap_time
-from .lap_row_detector import TesseractWord, VirtualLapRow, detect_virtual_lap_rows, find_virtual_row, infer_lap_count
+from .lap_row_detector import TesseractWord, detect_virtual_lap_rows, fill_missing_virtual_rows, find_virtual_row, infer_lap_count
 from .models import KartResult
 from .parser import ParsedSheet, _find_date, _find_heat, _find_time
 from .table_grid import TableGrid
@@ -27,7 +27,7 @@ def parse_grid_sheet(
 
     results: list[KartResult] = []
     for col in range(lap_col + 1, grid.col_count):
-        kart_no = _kart_no_from_header_cells(ocr_cells, kart_row, col, lap_col)
+        kart_no = _kart_no_from_header_cells(ocr_cells, kart_row, col)
         laps: list[float] = []
         for row in range(kart_row + 1, stop_row):
             laps.extend(_parse_lap_times(_cell_text(ocr_cells, row, col)))
@@ -76,17 +76,9 @@ def parse_grid_sheet_with_virtual_rows(
 
     all_words = [word for words in column_words.values() for word in words]
     expected_laps = infer_lap_count(column_words.get(lap_col, []), lap_nr_y) or _infer_lap_count_from_cells(header_cells, kart_row + 1, lap_col)
-    if avg_y is not None and expected_laps is not None and 17 <= expected_laps < 28:
-        expected_laps = 28
     clustered_rows = detect_virtual_lap_rows(all_words, lap_nr_y=lap_nr_y, table_height=int(avg_y or grid.image.shape[0]))
-    if expected_laps is not None and expected_laps >= len(clustered_rows):
-        rows = detect_virtual_lap_rows(
-            all_words,
-            lap_nr_y=lap_nr_y,
-            table_height=int(avg_y or grid.image.shape[0]),
-            bottom_y=avg_y,
-            expected_count=expected_laps,
-        )
+    if expected_laps is not None and expected_laps >= len(clustered_rows) + 3:
+        rows = fill_missing_virtual_rows(clustered_rows, expected_laps, lap_nr_y, avg_y, int(avg_y or grid.image.shape[0]))
     else:
         rows = clustered_rows
     if not rows:
@@ -97,7 +89,7 @@ def parse_grid_sheet_with_virtual_rows(
     for col in sorted(column_words):
         if col <= lap_col:
             continue
-        kart_no = _kart_no_from_header_cells(header_cells, kart_row, col, lap_col)
+        kart_no = _kart_no_from_header_cells(header_cells, kart_row, col)
         bucket: dict[int, list[tuple[float, float | None, str]]] = {}
         for word in column_words[col]:
             if avg_y is not None and word.center_y >= avg_y:
@@ -201,21 +193,12 @@ def _cell_text(ocr_cells: dict[tuple[int, int], CellOcrResult], row: int, col: i
     return cell.raw_text or cell.normalized_text
 
 
-def _kart_no_from_header_cells(ocr_cells: dict[tuple[int, int], CellOcrResult], row: int, col: int, lap_col: int) -> int | None:
-    text = _cell_text(ocr_cells, row, col)
-    value = normalize_kart_no(text)
-    if col == lap_col + 1 and value == 11 and normalize_kart_no(_cell_text(ocr_cells, row, col + 1)) == 2:
-        return 1
-    return value
+def _kart_no_from_header_cells(ocr_cells: dict[tuple[int, int], CellOcrResult], row: int, col: int) -> int | None:
+    return normalize_kart_no(_cell_text(ocr_cells, row, col))
 
 
 def _drop_column_outliers(laps: list[float]) -> list[float]:
-    if len(laps) < 4:
-        return laps
-    sorted_laps = sorted(laps)
-    median = sorted_laps[len(sorted_laps) // 2]
-    upper_limit = max(35.0, median * 1.6)
-    return [lap for lap in laps if lap <= upper_limit]
+    return laps
 
 
 def _parse_lap_times(text: str) -> list[float]:

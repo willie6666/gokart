@@ -1,4 +1,11 @@
-from gokart_bot.lap_row_detector import TesseractWord, detect_virtual_lap_rows, find_virtual_row, infer_lap_count, looks_like_lap_candidate
+from gokart_bot.lap_row_detector import (
+    TesseractWord,
+    detect_virtual_lap_rows,
+    fill_missing_virtual_rows,
+    find_virtual_row,
+    infer_lap_count,
+    looks_like_lap_candidate,
+)
 
 
 def word(text: str, y: float) -> TesseractWord:
@@ -26,12 +33,18 @@ def test_looks_like_lap_candidate_variants() -> None:
     assert looks_like_lap_candidate("l9.43")
 
 
-def test_detect_virtual_lap_rows_uses_expected_count_and_bottom() -> None:
-    rows = detect_virtual_lap_rows([], lap_nr_y=100, table_height=500, bottom_y=380, expected_count=28)
+def test_fill_missing_virtual_rows_uses_cluster_pitch() -> None:
+    clustered = detect_virtual_lap_rows(
+        [word("19.43", 100), word("19.50", 130), word("19.55", 160), word("19.60", 220)],
+        lap_nr_y=80,
+        table_height=260,
+        min_y_gap=8,
+    )
+    rows = fill_missing_virtual_rows(clustered, expected_count=5, lap_nr_y=80, bottom_y=260, table_height=260)
 
-    assert len(rows) == 28
-    assert rows[0].source == "estimated"
-    assert rows[-1].bottom == 380
+    assert len(rows) == 5
+    assert [row.source for row in rows] == ["ocr_cluster", "ocr_cluster", "ocr_cluster", "filled", "ocr_cluster"]
+    assert 190 <= rows[3].center_y <= 195
 
 
 def test_infer_lap_count_from_merged_lap_numbers() -> None:

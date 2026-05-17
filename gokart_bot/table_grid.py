@@ -19,6 +19,13 @@ class CellBox:
     h: int
 
 
+@dataclass(frozen=True)
+class CropRegion:
+    image: np.ndarray
+    x_offset: int
+    y_offset: int
+
+
 @dataclass
 class TableGrid:
     image: np.ndarray
@@ -293,12 +300,12 @@ def build_cells(x_lines: list[int], y_lines: list[int]) -> list[CellBox]:
     return cells
 
 
-def crop_column_region(grid: TableGrid, col: int, y_start: int, y_end: int | None = None, pad_x: int = 2):
+def crop_column_region(grid: TableGrid, col: int, y_start: int, y_end: int | None = None, pad_x: int = 2) -> CropRegion:
     x1 = max(0, grid.x_lines[col] + pad_x)
     x2 = min(grid.image.shape[1], grid.x_lines[col + 1] - pad_x)
     y1 = max(0, y_start)
     y2 = min(grid.image.shape[0], y_end if y_end is not None else grid.image.shape[0])
-    return grid.image[y1:y2, x1:x2]
+    return CropRegion(grid.image[y1:y2, x1:x2], x1, y1)
 
 
 def _with_edges(lines: list[int], max_value: int) -> list[int]:

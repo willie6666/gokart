@@ -133,11 +133,11 @@ class OcrEngine:
         y_end = _find_avg_y(grid, header_cells, lap_row + 1)
         column_words = {}
         for col in range(lap_col, grid.col_count):
-            crop = crop_column_region(grid, col, y_start=y_start, y_end=int(y_end) if y_end else None)
-            words = cell_engine.recognize_column_words(crop)
-            x_offset = grid.x_lines[col] + 2
+            region = crop_column_region(grid, col, y_start=y_start, y_end=int(y_end) if y_end else None)
+            mode = "lap_index" if col == lap_col else "lap_time"
+            words = cell_engine.recognize_column_words(region.image, mode=mode)
             translated = [
-                type(word)(word.text, word.confidence, word.x + x_offset, word.y + y_start, word.w, word.h)
+                type(word)(word.text, word.confidence, word.x + region.x_offset, word.y + region.y_offset, word.w, word.h)
                 for word in words
             ]
             column_words[col] = translated

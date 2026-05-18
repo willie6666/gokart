@@ -113,6 +113,7 @@ def write_virtual_rows_overlay(
     column_words: dict[int, list[OcrWord]],
     rows: list[VirtualLapRow],
     debug_dir: Path | None,
+    avg_y: float | None = None,
 ) -> None:
     if debug_dir is None:
         return
@@ -124,6 +125,10 @@ def write_virtual_rows_overlay(
         y = int(round(row.center_y))
         cv2.line(image, (0, y), (image.shape[1] - 1, y), (255, 0, 255), 1)
         cv2.putText(image, str(row.index), (4, y - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 255), 1)
+    if avg_y is not None:
+        y = int(avg_y)
+        cv2.line(image, (0, y), (image.shape[1] - 1, y), (0, 128, 255), 2)
+        cv2.putText(image, "Avg", (4, y - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 128, 255), 2)
     for col, words in column_words.items():
         for word in words:
             row_index = find_virtual_row(rows, word.center_y)

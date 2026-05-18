@@ -58,7 +58,7 @@ class OcrEngine:
         parsed = parse_grid_sheet_with_virtual_rows(grid, header_cells, column_words)
         write_cell_ocr(header_cells, debug_dir)
         write_ocr_words(column_words, virtual_rows, debug_dir)
-        write_virtual_rows_overlay(grid, column_words, virtual_rows, debug_dir)
+        write_virtual_rows_overlay(grid, column_words, virtual_rows, debug_dir, y_end)
         write_debug_parsed(parsed, debug_dir)
         write_parsed_overlay(grid, parsed, debug_dir)
         return parsed

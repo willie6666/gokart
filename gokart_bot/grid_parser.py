@@ -73,6 +73,7 @@ def parse_grid_sheet_with_virtual_rows(
         sheet.warnings.append("Lap/Nr cell not detected")
         return sheet
     kart_row, lap_col = lap_position
+    avg_row = _find_avg_row(header_cells, kart_row + 1)
     lap_cell = grid.cell(kart_row, lap_col)
     lap_nr_y = float(lap_cell.y + lap_cell.h) if lap_cell else float(grid.y_lines[min(kart_row + 1, len(grid.y_lines) - 1)])
     avg_y = _find_avg_y(grid, header_cells, kart_row + 1)
@@ -115,7 +116,7 @@ def parse_grid_sheet_with_virtual_rows(
                 kart_no=kart_no,
                 position=col - lap_col,
                 laps=laps,
-                printed_avg=_avg_lap_from_cells(header_cells, _find_avg_row(header_cells, kart_row + 1), col),
+                printed_avg=_avg_lap_from_cells(header_cells, avg_row, col),
             )
         )
 
@@ -131,6 +132,7 @@ def parse_grid_sheet_with_virtual_rows(
         "expected_laps": expected_laps,
         "clustered_laps": len(clustered_rows),
         "avg_y": avg_y,
+        "avg_row": avg_row,
     }
     return sheet
 
@@ -232,7 +234,7 @@ def _build_kart_result(
         kart_no=kart_no,
         position=position,
         best_lap=min(laps) if laps else None,
-        avg_lap=printed_avg if printed_avg is not None else computed_avg,
+        avg_lap=printed_avg,
         laps=laps,
     )
 

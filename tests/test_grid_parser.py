@@ -26,6 +26,8 @@ def test_parse_grid_sheet_by_row_col() -> None:
         (4, 2): cell(4, 2, "19:65"),
         (4, 3): cell(4, 3, "20,18"),
         (5, 1): cell(5, 1, "Avg."),
+        (5, 2): cell(5, 2, "20.25"),
+        (5, 3): cell(5, 3, "20.90"),
     }
 
     parsed = parse_grid_sheet(grid(), cells)
@@ -34,7 +36,24 @@ def test_parse_grid_sheet_by_row_col() -> None:
     assert parsed.heat == "Heat 12"
     assert [kart.kart_no for kart in parsed.karts[:2]] == [12, 7]
     assert parsed.karts[0].laps == [20.84, 19.65]
+    assert parsed.karts[0].avg_lap == 20.25
     assert parsed.karts[1].best_lap == 20.18
+
+
+def test_parse_grid_sheet_warns_when_printed_avg_does_not_match_laps() -> None:
+    cells = {
+        (2, 1): cell(2, 1, "Lap/Nr"),
+        (2, 2): cell(2, 2, "12"),
+        (3, 2): cell(3, 2, "20.00"),
+        (4, 2): cell(4, 2, "22.00"),
+        (5, 1): cell(5, 1, "Avg."),
+        (5, 2): cell(5, 2, "20.00"),
+    }
+
+    parsed = parse_grid_sheet(grid(), cells)
+
+    assert parsed.karts[0].avg_lap == 20.0
+    assert any("車號 12 平均圈速不一致" in warning for warning in parsed.warnings)
 
 
 def test_unknown_kart_number_is_not_auto_filled() -> None:

@@ -32,9 +32,10 @@ def format_session(session: SessionRecord) -> str:
 def format_kart_line(kart: KartResult) -> str:
     kart_label = f"車號 {kart.kart_no}" if kart.kart_no is not None else f"未知欄位 {kart.position or '?'}"
     best = f"{kart.best_lap:.2f}s" if kart.best_lap is not None else "未知"
+    avg = f"{kart.avg_lap:.2f}s" if kart.avg_lap is not None else "未知"
     laps = f"{len(kart.laps)} 圈" if kart.laps else "圈數未知"
-    claimed = f"，已認領：{kart.claimed_by_name}" if kart.claimed_by_name else ""
-    return f"{kart_label}：最佳 {best}，{laps}{claimed}"
+    claimed = f"，已認領：{_driver_label(kart)}" if kart.claimed_by_user_id is not None or kart.claimed_by_name else ""
+    return f"{kart_label}：最佳 {best}，平均 {avg}，{laps}{claimed}"
 
 
 def format_laps(session: SessionRecord, kart_no: int | None = None) -> str:
@@ -143,9 +144,30 @@ def format_leaderboard(sessions: list[SessionRecord], limit: int = 10) -> str:
     if not rows:
         return "目前沒有已認領的可排名紀錄。"
 
-    lines = ["卡丁車排行榜"]
+    lines = ["卡丁車排行榜·最佳單圈"]
     for index, (session, kart) in enumerate(rows[:limit], 1):
         lines.append(f"{index}. {kart.best_lap:.2f}s｜{_driver_label(kart)}｜{_session_label(session)}")
+    return "\n".join(lines)
+
+
+def format_leaderboard_avg(sessions: list[SessionRecord], limit: int = 10) -> str:
+    best_by_user: dict[int, tuple[SessionRecord, KartResult]] = {}
+    for session in sessions:
+        for kart in session.karts:
+            if kart.claimed_by_user_id is None or kart.avg_lap is None:
+                continue
+            current = best_by_user.get(kart.claimed_by_user_id)
+            if current is None or kart.avg_lap < (current[1].avg_lap or 999):
+                best_by_user[kart.claimed_by_user_id] = (session, kart)
+
+    rows = sorted(best_by_user.values(), key=lambda item: item[1].avg_lap or 999)
+
+    if not rows:
+        return "目前沒有已認領的可排名紀錄。"
+
+    lines = ["卡丁車排行榜·最佳平均"]
+    for index, (session, kart) in enumerate(rows[:limit], 1):
+        lines.append(f"{index}. {kart.avg_lap:.2f}s｜{_driver_label(kart)}｜{_session_label(session)}")
     return "\n".join(lines)
 
 
@@ -165,8 +187,9 @@ def _session_label(session: SessionRecord) -> str:
 
 
 def _driver_label(kart: KartResult) -> str:
-    mention = f"<@{kart.claimed_by_user_id}>" if kart.claimed_by_user_id is not None else "未知車手"
-    return f"{mention}" if kart.claimed_by_name else mention
+    if kart.claimed_by_user_id is not None:
+        return f"<@{kart.claimed_by_user_id}>"
+    return kart.claimed_by_name or "未知車手"
 
 
 def _format_lap_table(laps: list[float]) -> str:

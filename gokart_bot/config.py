@@ -11,15 +11,12 @@ from dotenv import load_dotenv
 class Config:
     discord_token: str
     data_path: Path
-    image_dir: Path
     ocr_max_side: int
     ocr_workers: int
     ocr_lang: str
     ocr_device: str
     ocr_enable_mkldnn: bool
     ocr_cpu_threads: int
-    debug_ocr: bool
-    debug_dir: Path
 
 
 def load_config() -> Config:
@@ -31,14 +28,11 @@ def load_config() -> Config:
 
     return Config(
         discord_token=token,
-        data_path=Path(os.environ.get("GOKART_DATA_PATH", "data/gokart_records.json")),
-        image_dir=Path(os.environ.get("GOKART_IMAGE_DIR", "data/images")),
+        data_path=Path(os.environ.get("GOKART_DATA_PATH", "data")),
         ocr_max_side=int(os.environ.get("GOKART_OCR_MAX_SIDE", "1600")),
         ocr_workers=max(1, int(os.environ.get("GOKART_OCR_WORKERS", "1"))),
         ocr_lang=os.environ.get("GOKART_OCR_LANG", "ch").strip() or "ch",
         ocr_device=os.environ.get("GOKART_OCR_DEVICE", "cpu").strip() or "cpu",
         ocr_enable_mkldnn=os.environ.get("GOKART_OCR_ENABLE_MKLDNN", "false").strip().lower() not in {"0", "false", "no"},
         ocr_cpu_threads=max(1, int(os.environ.get("GOKART_OCR_CPU_THREADS", str(os.cpu_count() or 1)))),
-        debug_ocr=os.environ.get("GOKART_DEBUG_OCR", "true").strip().lower() not in {"0", "false", "no"},
-        debug_dir=Path(os.environ.get("GOKART_DEBUG_DIR", "data/debug")),
     )

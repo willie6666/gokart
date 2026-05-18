@@ -15,23 +15,21 @@ class OcrEngine:
     def __init__(
         self,
         max_side: int = 1600,
-        debug_ocr: bool = False,
-        debug_dir: Path | str = Path("data/debug"),
+        debug_dir: Path | str = Path("data"),
         ocr_lang: str = "ch",
         ocr_device: str = "cpu",
         ocr_enable_mkldnn: bool = False,
         ocr_cpu_threads: int = 1,
     ) -> None:
         self.max_side = max_side
-        self.debug_ocr = debug_ocr
         self.debug_dir = Path(debug_dir)
         self.cell_engine = CellOcrEngine(lang=ocr_lang, device=ocr_device, enable_mkldnn=ocr_enable_mkldnn, cpu_threads=ocr_cpu_threads)
 
-    def recognize_lap_sheet(self, image_path: Path, session_id: str | None = None, force_debug: bool = False) -> ParsedSheet:
-        debug_dir = self.debug_dir_for_session(session_id) if force_debug else self._debug_dir(session_id)
+    def recognize_lap_sheet(self, image_path: Path, session_id: str | None = None) -> ParsedSheet:
+        debug_dir = self.debug_dir_for_session(session_id)
         grid = extract_table_grid(image_path, debug_dir, self.max_side)
-        if grid.row_count < 10 or grid.col_count < 6:
-            raise RuntimeError("Grid detection failed; not enough table rows or columns")
+        if grid.row_count < 8 or grid.col_count < 18:
+            raise RuntimeError("無法辨識：無法偵測到完整表格")
         cell_engine = self.cell_engine
         table_words = cell_engine.recognize_image_words(grid.image)
         write_paddleocr_overlay(grid, table_words, debug_dir)
@@ -65,13 +63,8 @@ class OcrEngine:
         write_parsed_overlay(grid, parsed, debug_dir)
         return parsed
 
-    def _debug_dir(self, session_id: str | None) -> Path | None:
-        if not self.debug_ocr:
-            return None
-        return self.debug_dir_for_session(session_id)
-
     def debug_dir_for_session(self, session_id: str | None) -> Path:
-        return self.debug_dir / f"session-{session_id or 'manual'}"
+        return self.debug_dir / str(session_id or "manual")
 
 
 def _find_lap_cell(grid, header_cells) -> tuple[int, int] | None:

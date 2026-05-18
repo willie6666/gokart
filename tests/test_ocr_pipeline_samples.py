@@ -23,5 +23,5 @@ def test_sample_image_grid_artifacts(expected_name: str, tmp_path: Path) -> None
     else:
         assert grid.col_count >= expected["min_columns"]
         assert grid.row_count >= expected["min_rows"]
-    assert (tmp_path / expected_name / "table_warped.png").exists()
-    assert (tmp_path / expected_name / "grid_overlay.png").exists()
+    assert (tmp_path / expected_name / "images" / "table_warped.png").exists()
+    assert (tmp_path / expected_name / "images" / "grid_overlay.png").exists()

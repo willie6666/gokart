@@ -6,7 +6,11 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .image_preprocess import make_line_mask, make_line_masks, resize_max_side, warp_perspective
+from .image_preprocess import make_line_masks, resize_max_side, warp_perspective
+
+
+MIN_COMPLETE_TABLE_ROWS = 8
+MIN_COMPLETE_TABLE_COLS = 18
 
 
 @dataclass(frozen=True)
@@ -51,8 +55,11 @@ def extract_table_grid(image_path: Path, debug_dir: Path | None = None, max_side
     if debug_dir:
         debug_dir.mkdir(parents=True, exist_ok=True)
 
-    scanned, scan_warnings = scan_document(original)
-    table, warnings = find_and_warp_main_table(scanned)
+    image_dir = _debug_image_dir(debug_dir) if debug_dir else None
+    if image_dir:
+        cv2.imwrite(str(image_dir / "original_resized.png"), original)
+    scanned, scan_warnings = scan_document(original, image_dir)
+    table, warnings = find_and_warp_main_table(scanned, image_dir)
     warnings = scan_warnings + warnings
     x_lines, y_lines = detect_grid_lines(table)
     col_count = len(x_lines) - 1
@@ -63,17 +70,24 @@ def extract_table_grid(image_path: Path, debug_dir: Path | None = None, max_side
         warnings.append(f"grid has too few rows: {row_count}")
     cells = build_cells(x_lines, y_lines)
     grid = TableGrid(table, cells, row_count, col_count, x_lines, y_lines, warnings)
-    if debug_dir:
-        cv2.imwrite(str(debug_dir / "table_warped.png"), table)
-        _write_grid_overlay(grid, debug_dir / "grid_overlay.png")
+    if image_dir:
+        cv2.imwrite(str(image_dir / "table_warped.png"), table)
+        _write_grid_overlay(grid, image_dir / "grid_overlay.png")
     return grid
 
 
-def scan_document(image):
+def scan_document(image, image_dir: Path | None = None):
     warnings: list[str] = []
     height, width = image.shape[:2]
     candidates: list[tuple[float, np.ndarray]] = []
-    for contour in _paper_contours(image):
+    paper_contours = _paper_contours(image)
+    if image_dir:
+        overlay = image.copy()
+        for contour in paper_contours:
+            if cv2.contourArea(contour) > width * height * 0.02:
+                cv2.drawContours(overlay, [contour], -1, (0, 0, 255), 3)
+        cv2.imwrite(str(image_dir / "paper_contours.png"), overlay)
+    for contour in paper_contours:
         area = cv2.contourArea(contour)
         if area < width * height * 0.18:
             continue
@@ -91,11 +105,12 @@ def scan_document(image):
                 candidates.append((score, points))
                 break
     if not candidates:
-        warnings.append("paper scan fallback used")
         return image, warnings
 
     candidates.sort(key=lambda item: item[0], reverse=True)
     warped = warp_perspective(image, _expand_quad(candidates[0][1], image.shape, padding_ratio=0.01))
+    if image_dir:
+        cv2.imwrite(str(image_dir / "paper_warped.png"), warped)
     return warped, warnings
 
 
@@ -113,9 +128,14 @@ def _paper_contours(image):
     return sorted(contours, key=cv2.contourArea, reverse=True)
 
 
-def find_and_warp_main_table(image):
+def find_and_warp_main_table(image, image_dir: Path | None = None):
     warnings: list[str] = []
-    mask = make_line_mask(image)
+    horizontal, vertical = make_line_masks(image)
+    mask = cv2.bitwise_or(horizontal, vertical)
+    if image_dir:
+        cv2.imwrite(str(image_dir / "line_mask.png"), mask)
+        cv2.imwrite(str(image_dir / "line_mask_horizontal.png"), horizontal)
+        cv2.imwrite(str(image_dir / "line_mask_vertical.png"), vertical)
     connected = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25)))
     connected = cv2.dilate(connected, cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9)), iterations=1)
     contours, _ = cv2.findContours(connected, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -138,11 +158,15 @@ def find_and_warp_main_table(image):
         candidates.append((score, area, x, y, w, h, contour))
 
     if not candidates:
-        warnings.append("table perspective fallback used")
-        return image, warnings
+        raise RuntimeError("無法辨識：無法偵測到完整表格")
 
     candidates.sort(key=lambda item: (item[0], item[1], -item[2]), reverse=True)
     _, _, x, y, w, h, contour = candidates[0]
+    if image_dir:
+        table_overlay = image.copy()
+        cv2.drawContours(table_overlay, [contour], -1, (0, 0, 255), 3)
+        cv2.rectangle(table_overlay, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        cv2.imwrite(str(image_dir / "table_contour.png"), table_overlay)
     support_contours = _supporting_table_contours(mask, x, y, w, h)
     if support_contours:
         points = np.vstack([candidate.reshape(-1, 2) for candidate in support_contours]).astype("float32")
@@ -155,35 +179,12 @@ def find_and_warp_main_table(image):
     warped_candidates = []
     if len(approx) == 4:
         warped = warp_perspective(image, _expand_quad(approx.reshape(4, 2).astype("float32"), image.shape))
-        warped_candidates.append(("approxPolyDP", *_quick_grid_counts(warped), warped))
-
-    rect = cv2.minAreaRect(points)
-    box = cv2.boxPoints(rect).astype("float32")
-    box_w, box_h = rect[1]
-    if min(box_w, box_h) > 1 and max(box_w, box_h) > width * 0.45:
-        warped = warp_perspective(image, _expand_quad(box, image.shape))
-        warped_candidates.append(("minAreaRect", *_quick_grid_counts(warped), warped))
-
-    sx, sy, sw, sh = cv2.boundingRect(points.astype("int32"))
-    pad = max(8, int(min(sw, sh) * 0.02))
-    x1 = max(0, sx - pad)
-    y1 = max(0, sy - pad)
-    x2 = min(width, sx + sw + pad)
-    y2 = min(height, sy + sh + pad)
-    crop = image[y1:y2, x1:x2]
-    if crop.size:
-        warped_candidates.append(("boundingRect", *_quick_grid_counts(crop), crop))
-
-    if warped_candidates:
-        warped_candidates.sort(key=lambda item: (min(item[1], 18) + min(item[2], 30), item[1] >= 10, item[2] >= 6), reverse=True)
-        method, rows, cols, warped = warped_candidates[0]
-        if rows >= 8 and cols >= 6:
-            if method != "approxPolyDP":
-                warnings.append(f"table perspective {method} used")
+        rows, cols = _quick_grid_counts(warped)
+        if rows >= MIN_COMPLETE_TABLE_ROWS and cols >= MIN_COMPLETE_TABLE_COLS:
             return warped, warnings
+        warped_candidates.append(("approxPolyDP", rows, cols, warped))
 
-    warnings.append("table perspective fallback used")
-    return crop if crop.size else image, warnings
+    raise RuntimeError("無法辨識：無法偵測到完整表格")
 
 
 def _supporting_table_contours(mask, x: int, y: int, w: int, h: int):
@@ -330,3 +331,9 @@ def _write_grid_overlay(grid: TableGrid, path: Path) -> None:
         cv2.putText(image, str(col), (x, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 1)
     path.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(path), image)
+
+
+def _debug_image_dir(debug_dir: Path) -> Path:
+    image_dir = debug_dir / "images"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    return image_dir

@@ -42,6 +42,7 @@ def write_debug_parsed(parsed: ParsedSheet, debug_dir: Path | None) -> None:
 def write_parsed_overlay(grid: TableGrid, parsed: ParsedSheet, debug_dir: Path | None) -> None:
     if debug_dir is None:
         return
+    image_dir = _debug_image_dir(debug_dir)
     image = grid.image.copy()
     for x in grid.x_lines:
         cv2.line(image, (x, 0), (x, image.shape[0] - 1), (0, 255, 0), 1)
@@ -61,13 +62,13 @@ def write_parsed_overlay(grid: TableGrid, parsed: ParsedSheet, debug_dir: Path |
         if cell:
             cv2.rectangle(image, (cell.x, cell.y), (cell.x + cell.w, cell.y + cell.h), (0, 0, 255), 3)
             cv2.putText(image, "Lap/Nr", (cell.x + 4, cell.y + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-    cv2.imwrite(str(debug_dir / "grid_overlay.png"), image)
+    cv2.imwrite(str(image_dir / "grid_parsed_overlay.png"), image)
 
 
 def write_paddleocr_overlay(grid: TableGrid, words: list[OcrWord], debug_dir: Path | None) -> None:
     if debug_dir is None:
         return
-    debug_dir.mkdir(parents=True, exist_ok=True)
+    image_dir = _debug_image_dir(debug_dir)
     image = grid.image.copy()
     for word in words:
         x1, y1 = int(round(word.x)), int(round(word.y))
@@ -75,7 +76,7 @@ def write_paddleocr_overlay(grid: TableGrid, words: list[OcrWord], debug_dir: Pa
         cv2.rectangle(image, (x1, y1), (x2, y2), (0, 128, 255), 1)
         label = word.text[:16]
         cv2.putText(image, label, (x1, max(10, y1 - 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 128, 255), 1)
-    cv2.imwrite(str(debug_dir / "paddleocr_overlay.png"), image)
+    cv2.imwrite(str(image_dir / "paddleocr_overlay.png"), image)
 
 
 def write_ocr_words(
@@ -115,6 +116,7 @@ def write_virtual_rows_overlay(
 ) -> None:
     if debug_dir is None:
         return
+    image_dir = _debug_image_dir(debug_dir)
     image = grid.image.copy()
     for x in grid.x_lines:
         cv2.line(image, (x, 0), (x, image.shape[0] - 1), (0, 255, 0), 1)
@@ -129,7 +131,13 @@ def write_virtual_rows_overlay(
             x2, y2 = int(round(word.x + word.w)), int(round(word.y + word.h))
             cv2.rectangle(image, (x1, y1), (x2, y2), (0, 128, 255), 1)
             cv2.putText(image, f"c{col}/r{row_index or '?'}", (x1, max(10, y1 - 2)), cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 128, 255), 1)
-    cv2.imwrite(str(debug_dir / "virtual_rows_overlay.png"), image)
+    cv2.imwrite(str(image_dir / "virtual_rows_overlay.png"), image)
+
+
+def _debug_image_dir(debug_dir: Path) -> Path:
+    image_dir = debug_dir / "images"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    return image_dir
 
 
 def _draw_row(image, grid: TableGrid, row: int, color: tuple[int, int, int], label: str) -> None:

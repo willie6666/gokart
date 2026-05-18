@@ -9,6 +9,9 @@ from .parser import ParsedSheet, _find_date, _find_heat, _find_time
 from .table_grid import TableGrid
 
 
+AVG_MISMATCH_TOLERANCE = 0.05
+
+
 def parse_grid_sheet(
     grid: TableGrid,
     ocr_cells: dict[tuple[int, int], CellOcrResult],
@@ -35,12 +38,12 @@ def parse_grid_sheet(
         if len(laps) < 2:
             continue
         results.append(
-            KartResult(
+            _build_kart_result(
+                sheet,
                 kart_no=kart_no,
                 position=col - lap_col,
-                best_lap=min(laps) if laps else None,
-                avg_lap=round(sum(laps) / len(laps), 3) if laps else None,
                 laps=laps,
+                printed_avg=_avg_lap_from_cells(ocr_cells, avg_row, col),
             )
         )
     sheet.karts = results
@@ -77,7 +80,9 @@ def parse_grid_sheet_with_virtual_rows(
     all_words = [word for words in column_words.values() for word in words]
     expected_laps = infer_lap_count(column_words.get(lap_col, []), lap_nr_y) or _infer_lap_count_from_cells(header_cells, kart_row + 1, lap_col)
     clustered_rows = detect_virtual_lap_rows(all_words, lap_nr_y=lap_nr_y, table_height=int(avg_y or grid.image.shape[0]))
-    if expected_laps is not None and expected_laps >= len(clustered_rows) + 3:
+    if expected_laps is not None and len(clustered_rows) > expected_laps:
+        rows = clustered_rows[:expected_laps]
+    elif expected_laps is not None and expected_laps >= len(clustered_rows) + 3:
         rows = fill_missing_virtual_rows(clustered_rows, expected_laps, lap_nr_y, avg_y, int(avg_y or grid.image.shape[0]))
     else:
         rows = clustered_rows
@@ -105,12 +110,12 @@ def parse_grid_sheet_with_virtual_rows(
         if len(laps) < 2:
             continue
         results.append(
-            KartResult(
+            _build_kart_result(
+                sheet,
                 kart_no=kart_no,
                 position=col - lap_col,
-                best_lap=min(laps),
-                avg_lap=round(sum(laps) / len(laps), 3),
                 laps=laps,
+                printed_avg=_avg_lap_from_cells(header_cells, _find_avg_row(header_cells, kart_row + 1), col),
             )
         )
 
@@ -203,6 +208,33 @@ def _cell_text(ocr_cells: dict[tuple[int, int], CellOcrResult], row: int, col: i
 
 def _kart_no_from_header_cells(ocr_cells: dict[tuple[int, int], CellOcrResult], row: int, col: int) -> int | None:
     return normalize_kart_no(_cell_text(ocr_cells, row, col))
+
+
+def _avg_lap_from_cells(ocr_cells: dict[tuple[int, int], CellOcrResult], avg_row: int | None, col: int) -> float | None:
+    if avg_row is None:
+        return None
+    values = _parse_lap_times(_cell_text(ocr_cells, avg_row, col))
+    return values[0] if values else None
+
+
+def _build_kart_result(
+    sheet: ParsedSheet,
+    kart_no: int | None,
+    position: int,
+    laps: list[float],
+    printed_avg: float | None,
+) -> KartResult:
+    computed_avg = round(sum(laps) / len(laps), 3) if laps else None
+    if printed_avg is not None and computed_avg is not None and abs(printed_avg - computed_avg) > AVG_MISMATCH_TOLERANCE:
+        label = f"車號 {kart_no}" if kart_no is not None else f"欄位 {position}"
+        sheet.warnings.append(f"{label} 平均圈速不一致：表格 {printed_avg:.2f}s，辨識圈速平均 {computed_avg:.2f}s，請檢查上方圈速")
+    return KartResult(
+        kart_no=kart_no,
+        position=position,
+        best_lap=min(laps) if laps else None,
+        avg_lap=printed_avg if printed_avg is not None else computed_avg,
+        laps=laps,
+    )
 
 
 def _drop_column_outliers(laps: list[float]) -> list[float]:

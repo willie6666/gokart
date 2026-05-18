@@ -2,6 +2,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 from gokart_bot.table_grid import build_cells, extract_table_grid, merge_positions
 
@@ -18,9 +19,9 @@ def test_build_cells() -> None:
     assert cells[0].w == 10
 
 
-def test_right_side_best_laptimes_is_ignored(tmp_path: Path) -> None:
-    image = np.full((500, 900, 3), 255, dtype=np.uint8)
-    for x in range(20, 621, 100):
+def test_incomplete_synthetic_table_fails_without_fallback(tmp_path: Path) -> None:
+    image = np.full((500, 1100, 3), 255, dtype=np.uint8)
+    for x in range(20, 781, 40):
         cv2.line(image, (x, 60), (x, 460), (0, 0, 0), 2)
     for y in range(60, 461, 40):
         cv2.line(image, (20, y), (620, y), (0, 0, 0), 2)
@@ -31,8 +32,14 @@ def test_right_side_best_laptimes_is_ignored(tmp_path: Path) -> None:
     path = tmp_path / "synthetic.jpg"
     cv2.imwrite(str(path), image)
 
-    grid = extract_table_grid(path, tmp_path / "debug", max_side=900)
+    with pytest.raises(RuntimeError, match="無法辨識"):
+        extract_table_grid(path, tmp_path / "debug", max_side=900)
 
-    assert grid.image.shape[1] > 500
-    assert grid.col_count >= 6
-    assert (tmp_path / "debug" / "grid_overlay.png").exists()
+
+def test_partial_table_sample_fails_without_fallback(tmp_path: Path) -> None:
+    image_path = Path("examples/IMG_20260508_151106.jpg")
+    if not image_path.exists():
+        pytest.skip(f"sample image not available: {image_path}")
+
+    with pytest.raises(RuntimeError, match="無法辨識"):
+        extract_table_grid(image_path, tmp_path / "partial", max_side=1600)

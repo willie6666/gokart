@@ -166,6 +166,18 @@ def normalize_lap_text(text: str) -> str:
 
 
 def parse_lap_time(text: str) -> float | None:
+    text = text.strip()
+    text = text.replace("O", "0").replace("o", "0")
+    text = text.replace("I", "1").replace("l", "1").replace("|", "1")
+    text = text.replace(",", ".")
+    
+    match = re.fullmatch(r"(\d{1,2})[:：](\d{1,2})\.(\d{2,3})", text)
+    if match:
+        minutes, seconds, fraction = match.groups()
+        value = int(minutes) * 60 + int(seconds) + float(f"0.{fraction}")
+        value = round(value, 3)
+        return value if 15.0 <= value <= 90.0 else None
+
     normalized = normalize_lap_text(text)
     if not re.fullmatch(r"\d{1,2}\.\d{2,3}", normalized):
         return None

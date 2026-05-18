@@ -248,8 +248,9 @@ def _parse_lap_times(text: str) -> list[float]:
     if lap is not None:
         return [lap]
     laps: list[float] = []
-    for token in re.findall(r"\d{1,2}[\.,:]\d{2,3}|\d{4,5}", text):
-        lap = parse_lap_time(normalize_lap_text(token))
+    pattern = r"\d{1,2}[:：]\d{1,2}[.,]\d{2,3}|\d{1,2}[.,:]\d{2,3}|\d{4,5}"
+    for token in re.findall(pattern, text):
+        lap = parse_lap_time(token)
         if lap is not None:
             laps.append(lap)
     return laps

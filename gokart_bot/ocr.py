@@ -56,9 +56,10 @@ class OcrEngine:
         all_words = [word for words in column_words.values() for word in words]
         virtual_rows = detect_virtual_lap_rows(all_words, float(y_start), int(y_end or grid.image.shape[0]))
         parsed = parse_grid_sheet_with_virtual_rows(grid, header_cells, column_words)
+        avg_visual = _avg_cell_center(grid, header_cells, lap_row + 1)
         write_cell_ocr(header_cells, debug_dir)
         write_ocr_words(column_words, virtual_rows, debug_dir)
-        write_virtual_rows_overlay(grid, column_words, virtual_rows, debug_dir, y_end)
+        write_virtual_rows_overlay(grid, column_words, virtual_rows, debug_dir, avg_visual)
         write_debug_parsed(parsed, debug_dir)
         write_parsed_overlay(grid, parsed, debug_dir)
         return parsed
@@ -97,6 +98,16 @@ def _find_avg_y(grid, header_cells, start_row: int) -> float | None:
         return None
     cell = grid.cell(min(rows), 0)
     return float(cell.y) if cell else None
+
+
+def _avg_cell_center(grid, header_cells, start_row: int) -> float | None:
+    from .grid_parser import looks_like_avg
+
+    rows = [row for (row, _), cell in header_cells.items() if row >= start_row and looks_like_avg(cell.raw_text or cell.normalized_text)]
+    if not rows:
+        return None
+    cell = grid.cell(min(rows), 0)
+    return float(cell.y + cell.h / 2) if cell else None
 
 
 def _column_words_from_table_words(table_words, region, mode: str):

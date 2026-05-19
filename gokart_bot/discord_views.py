@@ -121,14 +121,21 @@ class ParseModeButton(discord.ui.Button[ParseModeView]):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         assert self.view is not None
-        reparse_name = "reprocess_session_grid" if self.mode == "grid" else "reprocess_session_direct"
-        reparse = getattr(interaction.client, reparse_name, None)
-        if reparse is None:
+        existing = self.view.store.get_session(self.session_id)
+        if existing is None:
+            await interaction.response.send_message(f"找不到紀錄 #{self.session_id}", ephemeral=True)
+            return
+        if existing.raw_ocr.get("mode") != "pending":
+            await interaction.response.edit_message(content=_fit_discord_message(format_session(existing)), embed=None, view=ClaimView(self.view.store, self.session_id))
+            return
+        parse_name = "parse_session_grid" if self.mode == "grid" else "parse_session_direct"
+        parse_session = getattr(interaction.client, parse_name, None)
+        if parse_session is None:
             await interaction.response.send_message("目前 bot 不支援這個解析方式。", ephemeral=True)
             return
         try:
             await interaction.response.edit_message(content="正在辨識卡丁車成績表，請稍候...", embed=None, view=None)
-            session = await reparse(self.session_id)
+            session = await parse_session(self.session_id)
         except ValueError as exc:
             if interaction.message is not None:
                 current = self.view.store.get_session(self.session_id)

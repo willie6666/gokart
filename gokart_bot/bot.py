@@ -118,26 +118,6 @@ class GokartBot(commands.Bot):
         self.store.update_session(session)
         self.add_view(ParseModeView(self.store, session.id), message_id=progress.id)
 
-    def _failed_session(
-        self,
-        session_id: str,
-        message: discord.Message,
-        attachment: discord.Attachment,
-        warning: str,
-        raw_ocr: dict,
-    ) -> SessionRecord:
-        return SessionRecord(
-            id=session_id,
-            channel_id=message.channel.id,
-            source_message_id=message.id,
-            image_url=attachment.url,
-            author_user_id=message.author.id,
-            author_name=message.author.display_name,
-            created_at=now_iso(),
-            warnings=[warning],
-            raw_ocr=raw_ocr,
-        )
-
     async def send_debug_artifacts(self, session_id: str, source_filename: str) -> None:
         debug_channel_id = self.store.get_debug_channel_id()
         if debug_channel_id is None:
@@ -180,13 +160,15 @@ class GokartBot(commands.Bot):
         message = await channel.fetch_message(session.result_message_id)
         await message.edit(content=_fit_discord_message(format_session(session)), embed=None, view=ClaimView(self.store, session.id))
 
-    async def reprocess_session_direct(self, session_id: str) -> SessionRecord:
-        return await self._reprocess_session(session_id, "direct")
+    async def parse_session_direct(self, session_id: str) -> SessionRecord:
+        return await self._parse_session(session_id, "direct")
 
-    async def reprocess_session_grid(self, session_id: str) -> SessionRecord:
-        return await self._reprocess_session(session_id, "grid")
+    async def parse_session_grid(self, session_id: str) -> SessionRecord:
+        return await self._parse_session(session_id, "grid")
 
-    async def _reprocess_session(self, session_id: str, mode: str) -> SessionRecord:
+    async def _parse_session(self, session_id: str, mode: str) -> SessionRecord:
+        if mode not in {"direct", "grid"}:
+            raise ValueError(f"不支援的解析方式：{mode}")
         session = self.store.get_session(session_id)
         if session is None:
             raise ValueError(f"找不到紀錄 #{session_id}")

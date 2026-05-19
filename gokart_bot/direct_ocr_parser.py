@@ -48,13 +48,17 @@ def recognize_lap_sheet_direct(
         enable_mkldnn=ocr_enable_mkldnn,
         cpu_threads=ocr_cpu_threads,
     ).recognize_image_words(image)
-    parsed = parse_direct_ocr_words(words)
-    debug = getattr(parsed, "direct_debug", None)
-    _write_direct_debug(image, debug if isinstance(debug, DirectParseDebug) else DirectParseDebug(words, None, None, [], [], [], []), parsed, debug_dir)
+    parsed, debug = _parse_direct_ocr_words_with_debug(words)
+    _write_direct_debug(image, debug, parsed, debug_dir)
     return parsed
 
 
 def parse_direct_ocr_words(words: list[OcrWord]) -> ParsedSheet:
+    parsed, _ = _parse_direct_ocr_words_with_debug(words)
+    return parsed
+
+
+def _parse_direct_ocr_words_with_debug(words: list[OcrWord]) -> tuple[ParsedSheet, DirectParseDebug]:
     sheet = ParsedSheet()
     all_text = " ".join(word.text for word in sorted(words, key=lambda item: (item.y, item.x)))
     sheet.date = _find_date(all_text)
@@ -65,8 +69,7 @@ def parse_direct_ocr_words(words: list[OcrWord]) -> ParsedSheet:
     if lap_word is None:
         sheet.warnings.append("Lap/Nr cell not detected")
         sheet.raw_debug_summary = {"mode": "direct_paddleocr", "word_count": len(words)}
-        sheet.direct_debug = DirectParseDebug(words, None, None, [], [], [], [])
-        return sheet
+        return sheet, DirectParseDebug(words, None, None, [], [], [], [])
 
     avg_word = _first_word(words, looks_like_avg)
     kart_words = _right_chain(words, lap_word, parse_kart_no)
@@ -83,7 +86,7 @@ def parse_direct_ocr_words(words: list[OcrWord]) -> ParsedSheet:
         if len(laps) < 2:
             avg_matches.append(None)
             continue
-        avg_match = _matching_avg_word(avg_values, kart_word, position)
+        avg_match = _matching_avg_word(avg_values, position)
         avg_matches.append(avg_match)
         printed_avg = parse_lap_time(avg_match.text) if avg_match else None
         karts.append(
@@ -110,8 +113,8 @@ def parse_direct_ocr_words(words: list[OcrWord]) -> ParsedSheet:
         "lap_chains": [[_word_debug(word) for word in chain] for chain in lap_chains],
         "avg_matches": [_word_debug(word) if word else None for word in avg_matches],
     }
-    sheet.direct_debug = DirectParseDebug(words, lap_word, avg_word, kart_words, avg_values, lap_chains, avg_matches)
-    return sheet
+    debug = DirectParseDebug(words, lap_word, avg_word, kart_words, avg_values, lap_chains, avg_matches)
+    return sheet, debug
 
 
 def _first_word(words: list[OcrWord], predicate) -> OcrWord | None:
@@ -188,7 +191,7 @@ def _best_below_by_x_overlap(words: list[OcrWord], anchor: OcrWord, used: set[in
     return max(candidates, key=lambda item: (item[0], item[1], -item[2]))[3]
 
 
-def _matching_avg_word(avg_values: list[OcrWord], kart_word: OcrWord, position: int) -> OcrWord | None:
+def _matching_avg_word(avg_values: list[OcrWord], position: int) -> OcrWord | None:
     if position - 1 < len(avg_values):
         return avg_values[position - 1]
     return None

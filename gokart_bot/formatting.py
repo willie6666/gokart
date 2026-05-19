@@ -40,6 +40,8 @@ def format_kart_line(kart: KartResult) -> str:
 
 
 def _parse_mode_label(mode: object) -> str:
+    if mode == "pending":
+        return "尚未選擇"
     if mode == "direct_paddleocr":
         return "直接 PaddleOCR"
     if mode == "grid_virtual_rows":

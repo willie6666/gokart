@@ -6,7 +6,7 @@ from gokart_bot.table_grid import TableGrid, build_cells
 
 
 def cell(row: int, col: int, text: str) -> CellOcrResult:
-    return CellOcrResult(row, col, text, text, 0.9)
+    return CellOcrResult(row, col, text, 0.9)
 
 
 def grid() -> TableGrid:
@@ -23,8 +23,8 @@ def test_parse_grid_sheet_by_row_col() -> None:
         (2, 3): cell(2, 3, "7"),
         (3, 2): cell(3, 2, "20.84"),
         (3, 3): cell(3, 3, "21.62"),
-        (4, 2): cell(4, 2, "19:65"),
-        (4, 3): cell(4, 3, "20,18"),
+        (4, 2): cell(4, 2, "19.65"),
+        (4, 3): cell(4, 3, "20.18"),
         (5, 1): cell(5, 1, "Avg."),
         (5, 2): cell(5, 2, "20.25"),
         (5, 3): cell(5, 3, "20.90"),
@@ -58,7 +58,7 @@ def test_parse_grid_sheet_warns_when_printed_avg_does_not_match_laps() -> None:
 
 def test_unknown_kart_number_is_not_auto_filled() -> None:
     cells = {
-        (2, 1): cell(2, 1, "Lp/Nr"),
+        (2, 1): cell(2, 1, "Lap/Nr"),
         (2, 3): cell(2, 3, "2"),
         (3, 2): cell(3, 2, "19.42"),
         (3, 3): cell(3, 3, "24.26"),
@@ -133,17 +133,17 @@ def test_first_kart_eleven_before_two_is_not_auto_corrected() -> None:
     assert [kart.kart_no for kart in parsed.karts] == [11, 2]
 
 
-def test_lap_nr_label_matching_handles_ocr_noise() -> None:
-    for value in ["Lap/Nr", "LapINr", "Lap|Nr", "Lp/Nr"]:
+def test_lap_nr_label_matching_uses_raw_paddle_text() -> None:
+    for value in ["Lap/Nr", "Lap/No", "lap / nr"]:
         assert looks_like_lap_nr(value)
 
-    for value in ["Date", "Heat", "Pos", "19.43", "Ln", "Lap Number"]:
+    for value in ["LapINr", "Lap|Nr", "Lp/Nr", "Date", "Heat", "Pos", "19.43", "Ln", "Lap Number"]:
         assert not looks_like_lap_nr(value)
 
 
-def test_avg_label_matching_handles_ocr_noise() -> None:
-    for value in ["Avg", "Avg.", "Avq", "HAvq", "LAva:", "LAvg"]:
+def test_avg_label_matching_uses_raw_paddle_text() -> None:
+    for value in ["Avg", "Avg.", "avg"]:
         assert looks_like_avg(value)
 
-    for value in ["Lap/Nr", "Date", "Heat", "19.43", "Average"]:
+    for value in ["Avq", "HAvq", "LAva:", "LAvg", "Lap/Nr", "Date", "Heat", "19.43", "Average"]:
         assert not looks_like_avg(value)

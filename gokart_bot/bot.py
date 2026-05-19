@@ -15,7 +15,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from .config import load_config
-from .discord_views import ClaimView
+from .direct_ocr_parser import recognize_lap_sheet_direct
+from .discord_views import ClaimView, ParseModeView
 from .formatting import format_laps, format_leaderboard, format_leaderboard_avg, format_myrecords, format_record_channel, format_session, format_user_records
 from .models import SessionRecord, now_iso
 from .ocr import OcrEngine
@@ -54,7 +55,8 @@ class GokartBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         for session in self.store.sessions_with_result_messages():
-            self.add_view(ClaimView(self.store, session.id), message_id=session.result_message_id)
+            view = ParseModeView(self.store, session.id) if session.raw_ocr.get("mode") == "pending" else ClaimView(self.store, session.id)
+            self.add_view(view, message_id=session.result_message_id)
 
         self.tree.add_command(me_command)
         self.tree.add_command(profile_command)
@@ -95,32 +97,10 @@ class GokartBot(commands.Bot):
             await self.process_attachment(message, attachment)
 
     async def process_attachment(self, message: discord.Message, attachment: discord.Attachment) -> None:
-        progress = await message.reply("正在辨識卡丁車成績表，請稍候...")
         session_id = self.store.next_session_id()
         image_path = self.store.images_dir(session_id) / f"source{Path(attachment.filename).suffix.lower() or '.jpg'}"
         image_path.parent.mkdir(parents=True, exist_ok=True)
         await attachment.save(image_path)
-
-        try:
-            loop = asyncio.get_running_loop()
-            parsed = await loop.run_in_executor(
-                self.ocr_executor,
-                partial(_recognize_lap_sheet_in_process, image_path, session_id, self.ocr_options),
-            )
-            raw_ocr = parsed.raw_debug_summary or {"mode": "grid"}
-        except BrokenProcessPool as exc:
-            LOGGER.exception("OCR worker process crashed for %s", attachment.filename)
-            self.ocr_executor.shutdown(wait=False, cancel_futures=True)
-            self.ocr_executor = self._create_ocr_executor()
-            await self.send_debug_artifacts(session_id, attachment.filename)
-            await progress.edit(content="辨識失敗：OCR 子行程崩潰，bot 已保留運作並重啟 OCR worker。")
-            return
-        except Exception as exc:
-            LOGGER.exception("OCR failed for %s", attachment.filename)
-            await self.send_debug_artifacts(session_id, attachment.filename)
-            await progress.edit(content=f"辨識失敗：{exc}")
-            return
-
         session = SessionRecord(
             id=session_id,
             channel_id=message.channel.id,
@@ -129,22 +109,34 @@ class GokartBot(commands.Bot):
             author_user_id=message.author.id,
             author_name=message.author.display_name,
             created_at=now_iso(),
-            date=parsed.date,
-            printed_time=parsed.printed_time,
-            heat=parsed.heat,
-            ocr_confidence=parsed.ocr_confidence,
-            warnings=parsed.warnings,
-            raw_ocr=raw_ocr,
-            karts=parsed.karts,
+            raw_ocr={"mode": "pending"},
         )
         self.store.add_session(session)
-
-        view = ClaimView(self.store, session.id)
-        await progress.edit(content=_fit_discord_message(format_session(session)), embed=None, view=view)
+        view = ParseModeView(self.store, session.id)
+        progress = await message.reply(_parse_mode_prompt(session_id), view=view)
         session.result_message_id = progress.id
         self.store.update_session(session)
-        self.add_view(ClaimView(self.store, session.id), message_id=progress.id)
-        await self.send_debug_artifacts(session_id, attachment.filename)
+        self.add_view(ParseModeView(self.store, session.id), message_id=progress.id)
+
+    def _failed_session(
+        self,
+        session_id: str,
+        message: discord.Message,
+        attachment: discord.Attachment,
+        warning: str,
+        raw_ocr: dict,
+    ) -> SessionRecord:
+        return SessionRecord(
+            id=session_id,
+            channel_id=message.channel.id,
+            source_message_id=message.id,
+            image_url=attachment.url,
+            author_user_id=message.author.id,
+            author_name=message.author.display_name,
+            created_at=now_iso(),
+            warnings=[warning],
+            raw_ocr=raw_ocr,
+        )
 
     async def send_debug_artifacts(self, session_id: str, source_filename: str) -> None:
         debug_channel_id = self.store.get_debug_channel_id()
@@ -187,6 +179,56 @@ class GokartBot(commands.Bot):
             return
         message = await channel.fetch_message(session.result_message_id)
         await message.edit(content=_fit_discord_message(format_session(session)), embed=None, view=ClaimView(self.store, session.id))
+
+    async def reprocess_session_direct(self, session_id: str) -> SessionRecord:
+        return await self._reprocess_session(session_id, "direct")
+
+    async def reprocess_session_grid(self, session_id: str) -> SessionRecord:
+        return await self._reprocess_session(session_id, "grid")
+
+    async def _reprocess_session(self, session_id: str, mode: str) -> SessionRecord:
+        session = self.store.get_session(session_id)
+        if session is None:
+            raise ValueError(f"找不到紀錄 #{session_id}")
+        image_path = self._source_image_path(session_id)
+        if image_path is None:
+            raise ValueError(f"找不到紀錄 #{session_id} 的原始圖片")
+
+        loop = asyncio.get_running_loop()
+        try:
+            if mode == "grid":
+                parsed = await loop.run_in_executor(
+                    self.ocr_executor,
+                    partial(_recognize_lap_sheet_in_process, image_path, session_id, self.ocr_options),
+                )
+            else:
+                parsed = await loop.run_in_executor(
+                    self.ocr_executor,
+                    partial(_recognize_lap_sheet_direct_in_process, image_path, session_id, self.ocr_options),
+                )
+        except BrokenProcessPool:
+            self.ocr_executor.shutdown(wait=False, cancel_futures=True)
+            self.ocr_executor = self._create_ocr_executor()
+            label = "表格解析" if mode == "grid" else "直接 PaddleOCR 解析"
+            raise ValueError(f"{label}失敗：OCR 子行程崩潰，bot 已重啟 OCR worker。") from None
+        _preserve_claims_by_position(session, parsed.karts)
+        session.date = parsed.date
+        session.printed_time = parsed.printed_time
+        session.heat = parsed.heat
+        session.ocr_confidence = parsed.ocr_confidence
+        session.warnings = parsed.warnings
+        session.raw_ocr = parsed.raw_debug_summary or {"mode": "grid" if mode == "grid" else "direct_paddleocr"}
+        session.karts = parsed.karts
+        self.store.update_session(session)
+        await self.send_debug_artifacts(session_id, image_path.name)
+        return session
+
+    def _source_image_path(self, session_id: str) -> Path | None:
+        image_dir = self.store.images_dir(session_id)
+        for path in sorted(image_dir.glob("source.*")):
+            if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS:
+                return path
+        return None
 
 @app_commands.command(name="me", description="查詢自己的卡丁車歷史紀錄")
 async def me_command(interaction: discord.Interaction) -> None:
@@ -412,6 +454,30 @@ def _recognize_lap_sheet_in_process(image_path: Path, session_id: str, ocr_optio
     return engine.recognize_lap_sheet(image_path, session_id)
 
 
+def _recognize_lap_sheet_direct_in_process(image_path: Path, session_id: str, ocr_options: dict) -> object:
+    return recognize_lap_sheet_direct(
+        image_path,
+        max_side=ocr_options["max_side"],
+        debug_dir=Path(ocr_options["debug_dir"]) / str(session_id),
+        ocr_lang=ocr_options["ocr_lang"],
+        ocr_device=ocr_options["ocr_device"],
+        ocr_enable_mkldnn=ocr_options["ocr_enable_mkldnn"],
+        ocr_cpu_threads=ocr_options["ocr_cpu_threads"],
+    )
+
+
+def _preserve_claims_by_position(previous: SessionRecord, karts) -> None:
+    claims = {
+        kart.position: (kart.claimed_by_user_id, kart.claimed_by_name, kart.claimed_at)
+        for kart in previous.karts
+        if kart.position is not None and kart.claimed_by_user_id is not None
+    }
+    for kart in karts:
+        if kart.position not in claims:
+            continue
+        kart.claimed_by_user_id, kart.claimed_by_name, kart.claimed_at = claims[kart.position]
+
+
 def _parse_laps_argument(value: str) -> list[float]:
     laps: list[float] = []
     for part in value.replace("，", ",").split(","):
@@ -429,6 +495,10 @@ def _fit_discord_message(content: str) -> str:
     if len(content) <= 1900:
         return content
     return content[:1850] + "\n...（內容過長，已截斷。可用 /session 查詢或檢查資料檔）"
+
+
+def _parse_mode_prompt(session_id: str) -> str:
+    return f"紀錄 #{session_id} 已收到圖片。請選擇解析方式："
 
 
 async def _send_text_or_file(

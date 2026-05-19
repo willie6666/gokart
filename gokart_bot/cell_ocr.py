@@ -17,7 +17,6 @@ class CellOcrResult:
     row: int
     col: int
     raw_text: str
-    normalized_text: str
     confidence: float | None
 
     def to_dict(self) -> dict[str, object]:
@@ -25,7 +24,6 @@ class CellOcrResult:
             "row": self.row,
             "col": self.col,
             "raw_text": self.raw_text,
-            "normalized_text": self.normalized_text,
             "confidence": self.confidence,
         }
 
@@ -115,62 +113,25 @@ class CellOcrEngine:
                 continue
             grouped.setdefault((row, col), []).append(word)
         for cell in grid.cells:
-            mode = _mode_for_cell(cell.row, cell.col)
             items = sorted(grouped.get((cell.row, cell.col), []), key=lambda item: (item.y, item.x))
             raw = " ".join(item.text for item in items)
-            raw = _postprocess_ocr_text(raw, mode)
             scores = [item.confidence for item in items if item.confidence is not None]
             confidence = (sum(scores) / len(scores)) if scores else None
-            normalized = normalize_lap_text(raw) if mode == "lap_time" else _normalize_text(raw)
-            results[(cell.row, cell.col)] = CellOcrResult(cell.row, cell.col, raw, normalized, confidence)
+            results[(cell.row, cell.col)] = CellOcrResult(cell.row, cell.col, raw, confidence)
         return results
 
 
-def normalize_kart_no(text: str) -> int | None:
+def parse_kart_no(text: str) -> int | None:
     text = text.strip()
-    text = text.replace("O", "0").replace("o", "0")
-    text = text.replace("I", "1").replace("l", "1").replace("|", "1")
-    if re.fullmatch(r"\d{4,}", text):
+    if not re.fullmatch(r"\d{1,3}", text):
         return None
-    tokens = re.findall(r"\d{1,3}", text)
-    for token in tokens:
-        value = int(token)
-        if 0 < value <= 999:
-            return value
-    return None
-
-
-def normalize_lap_text(text: str) -> str:
-    text = text.strip()
-    text = text.replace("O", "0").replace("o", "0")
-    text = text.replace("I", "1").replace("l", "1").replace("|", "1")
-    text = text.replace(",", ".").replace(":", ".")
-    text = re.sub(r"[^0-9.]", "", text)
-    if not re.fullmatch(r"\d{1,2}\.\d{2,3}", text):
-        digits = re.sub(r"[^0-9]", "", text)
-        if re.fullmatch(r"\d{4}", digits):
-            return f"{digits[:2]}.{digits[2:]}"
-        if re.fullmatch(r"\d{5}", digits):
-            return f"{digits[:2]}.{digits[2:]}"
-    if re.fullmatch(r"\d{4}", text):
-        text = f"{text[:2]}.{text[2:]}"
-    elif re.fullmatch(r"\d{5}", text):
-        text = f"{text[:2]}.{text[2:]}"
-    elif "." not in text and len(text) >= 3:
-        text = text[:-2] + "." + text[-2:]
-    if "." not in text:
-        digits = re.sub(r"[^0-9]", "", text)
-        if len(digits) >= 3:
-            text = digits[:-2] + "." + digits[-2:]
-    return text
+    value = int(text)
+    return value if 0 < value <= 999 else None
 
 
 def parse_lap_time(text: str) -> float | None:
     text = text.strip()
-    text = text.replace("O", "0").replace("o", "0")
-    text = text.replace("I", "1").replace("l", "1").replace("|", "1")
-    text = text.replace(",", ".")
-    
+
     match = re.fullmatch(r"(\d{1,2})[:：](\d{1,2})\.(\d{2,3})", text)
     if match:
         minutes, seconds, fraction = match.groups()
@@ -178,34 +139,12 @@ def parse_lap_time(text: str) -> float | None:
         value = round(value, 3)
         return value if 15.0 <= value <= 90.0 else None
 
-    normalized = normalize_lap_text(text)
-    if not re.fullmatch(r"\d{1,2}\.\d{2,3}", normalized):
+    if not re.fullmatch(r"\d{1,2}\.\d{2,3}", text):
         return None
-    value = round(float(normalized), 3)
+    value = round(float(text), 3)
     if value < 15.0 or value > 90.0:
         return None
     return value
-
-
-def _mode_for_cell(row: int, col: int) -> str:
-    if row <= 2 or col <= 1:
-        return "text"
-    if row <= 4:
-        return "integer"
-    return "lap_time"
-
-
-def _postprocess_ocr_text(text: str, mode: str) -> str:
-    text = " ".join(text.strip().split())
-    if mode in {"integer", "lap_index"}:
-        return re.sub(r"[^0-9]", "", text)
-    if mode == "lap_time":
-        return re.sub(r"[^0-9.,:]", "", text)
-    return re.sub(r"[^0-9A-Za-z上午下午/:. ：]", "", text)
-
-
-def _normalize_text(text: str) -> str:
-    return " ".join(text.strip().split())
 
 
 def _poly_to_box(poly) -> list[float] | None:

@@ -142,12 +142,10 @@ def find_virtual_row(rows: list[VirtualLapRow], y: float) -> int | None:
 
 
 def looks_like_lap_candidate(text: str) -> bool:
-    normalized = _normalize_lap_text(text)
-    if re.fullmatch(r"\d{4,5}", normalized):
-        return True
-    if not re.fullmatch(r"\d{1,2}\.\d{2,3}", normalized):
+    text = text.strip()
+    if not re.fullmatch(r"\d{1,2}\.\d{2,3}", text):
         return False
-    value = float(normalized)
+    value = float(text)
     return 15.0 <= value <= 90.0
 
 
@@ -156,22 +154,3 @@ def _looks_like_row_anchor(text: str) -> bool:
     if looks_like_lap_candidate(stripped):
         return True
     return re.fullmatch(r"\d{1,2}", stripped) is not None
-
-
-def _normalize_lap_text(text: str) -> str:
-    text = text.strip()
-    text = text.replace("O", "0").replace("o", "0")
-    text = text.replace("I", "1").replace("l", "1").replace("|", "1")
-    text = text.replace(",", ".").replace(":", ".")
-    text = re.sub(r"[^0-9.]", "", text)
-    if not re.fullmatch(r"\d{1,2}\.\d{2,3}", text):
-        digits = re.sub(r"[^0-9]", "", text)
-        if re.fullmatch(r"\d{4}", digits):
-            return f"{digits[:2]}.{digits[2:]}"
-        if re.fullmatch(r"\d{5}", digits):
-            return f"{digits[:2]}.{digits[2:]}"
-    if re.fullmatch(r"\d{4}", text):
-        return f"{text[:2]}.{text[2:]}"
-    if re.fullmatch(r"\d{5}", text):
-        return f"{text[:2]}.{text[2:]}"
-    return text

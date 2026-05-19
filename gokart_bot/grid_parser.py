@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from .cell_ocr import CellOcrResult, normalize_kart_no, normalize_lap_text, parse_lap_time
+from .cell_ocr import CellOcrResult, parse_kart_no, parse_lap_time
 from .lap_row_detector import OcrWord, detect_virtual_lap_rows, fill_missing_virtual_rows, find_virtual_row, infer_lap_count
 from .models import KartResult
 from .parser import ParsedSheet, _find_date, _find_heat, _find_time
@@ -138,21 +138,11 @@ def parse_grid_sheet_with_virtual_rows(
 
 
 def looks_like_lap_nr(text: str) -> bool:
-    normalized = _normalize_label_text(text)
-    if not normalized:
-        return False
-    if len(normalized) < 4 or len(normalized) > 6:
-        return False
-    return any(_fuzzy_contains(normalized, target, max_distance=1) for target in ("lapnr", "lapno", "lapn", "lpnr"))
+    return re.fullmatch(r"\s*Lap\s*/\s*N[ro]\.?\s*", text, re.IGNORECASE) is not None
 
 
 def looks_like_avg(text: str) -> bool:
-    normalized = _normalize_label_text(text)
-    if not normalized:
-        return False
-    if len(normalized) > 4:
-        return False
-    return _fuzzy_contains(normalized, "avg", max_distance=1)
+    return re.fullmatch(r"\s*Avg\.?\s*", text, re.IGNORECASE) is not None
 
 
 def _parse_header(sheet: ParsedSheet, grid: TableGrid, cells: dict[tuple[int, int], CellOcrResult]) -> None:
@@ -167,14 +157,14 @@ def _parse_header(sheet: ParsedSheet, grid: TableGrid, cells: dict[tuple[int, in
 
 
 def _find_lap_nr_cell(ocr_cells: dict[tuple[int, int], CellOcrResult]) -> tuple[int, int] | None:
-    matches = [(row, col) for (row, col), cell in ocr_cells.items() if looks_like_lap_nr(cell.raw_text or cell.normalized_text)]
+    matches = [(row, col) for (row, col), cell in ocr_cells.items() if looks_like_lap_nr(cell.raw_text)]
     if not matches:
         return None
     return sorted(matches, key=lambda item: (item[0], item[1]))[0]
 
 
 def _find_avg_row(ocr_cells: dict[tuple[int, int], CellOcrResult], start_row: int) -> int | None:
-    rows = [row for (row, _), cell in ocr_cells.items() if row >= start_row and looks_like_avg(cell.raw_text or cell.normalized_text)]
+    rows = [row for (row, _), cell in ocr_cells.items() if row >= start_row and looks_like_avg(cell.raw_text)]
     return min(rows) if rows else None
 
 
@@ -205,11 +195,11 @@ def _cell_text(ocr_cells: dict[tuple[int, int], CellOcrResult], row: int, col: i
     cell = ocr_cells.get((row, col))
     if cell is None:
         return ""
-    return cell.raw_text or cell.normalized_text
+    return cell.raw_text
 
 
 def _kart_no_from_header_cells(ocr_cells: dict[tuple[int, int], CellOcrResult], row: int, col: int) -> int | None:
-    return normalize_kart_no(_cell_text(ocr_cells, row, col))
+    return parse_kart_no(_cell_text(ocr_cells, row, col))
 
 
 def _avg_lap_from_cells(ocr_cells: dict[tuple[int, int], CellOcrResult], avg_row: int | None, col: int) -> float | None:
@@ -248,7 +238,7 @@ def _parse_lap_times(text: str) -> list[float]:
     if lap is not None:
         return [lap]
     laps: list[float] = []
-    pattern = r"\d{1,2}[:：]\d{1,2}[.,]\d{2,3}|\d{1,2}[.,:]\d{2,3}|\d{4,5}"
+    pattern = r"\d{1,2}[:：]\d{1,2}\.\d{2,3}|\d{1,2}\.\d{2,3}"
     for token in re.findall(pattern, text):
         lap = parse_lap_time(token)
         if lap is not None:
@@ -261,40 +251,3 @@ def _choose_lap(candidates: list[tuple[float, float | None, str]]) -> float | No
         return None
     candidates = sorted(candidates, key=lambda item: ((item[1] or 0), -abs(len(item[2]) - 5)), reverse=True)
     return candidates[0][0]
-
-
-def _normalize_label_text(text: str) -> str:
-    text = text.lower()
-    text = text.translate(str.maketrans({"0": "o", "1": "i", "|": "i", "!": "i", "5": "s", "@": "a"}))
-    return re.sub(r"[^a-z]", "", text)
-
-
-def _fuzzy_contains(value: str, target: str, max_distance: int) -> bool:
-    if target in value:
-        return True
-    min_length = max(1, len(target) - max_distance)
-    max_length = len(target) + max_distance
-    for length in range(min_length, max_length + 1):
-        if length > len(value):
-            continue
-        for start in range(0, len(value) - length + 1):
-            if _edit_distance_at_most(value[start : start + length], target, max_distance):
-                return True
-    return False
-
-
-def _edit_distance_at_most(left: str, right: str, limit: int) -> bool:
-    if abs(len(left) - len(right)) > limit:
-        return False
-    previous = list(range(len(right) + 1))
-    for index, left_char in enumerate(left, 1):
-        current = [index]
-        row_min = current[0]
-        for right_index, right_char in enumerate(right, 1):
-            cost = 0 if left_char == right_char else 1
-            current.append(min(previous[right_index] + 1, current[right_index - 1] + 1, previous[right_index - 1] + cost))
-            row_min = min(row_min, current[-1])
-        if row_min > limit:
-            return False
-        previous = current
-    return previous[-1] <= limit

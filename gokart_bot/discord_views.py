@@ -15,12 +15,21 @@ class ClaimView(discord.ui.View):
         if session is None:
             return
         claimable = [kart for kart in session.karts if kart.position is not None]
-        for index, kart in enumerate(claimable[:20]):
+        for index, kart in enumerate(claimable[:19]):
             button = ClaimButton(session_id, kart.position, kart.kart_no, claimed_by_name=kart.claimed_by_name)
             button.row = index // 5
             self.add_item(button)
         if claimable:
             self.add_item(KartLapsSelect(session_id, claimable[:25]))
+
+
+class ParseModeView(discord.ui.View):
+    def __init__(self, store: JsonStore, session_id: str) -> None:
+        super().__init__(timeout=None)
+        self.store = store
+        self.session_id = session_id
+        self.add_item(ParseModeButton(session_id, "grid", "使用表格解析", discord.ButtonStyle.primary))
+        self.add_item(ParseModeButton(session_id, "direct", "直接用 PaddleOCR 解析", discord.ButtonStyle.secondary))
 
 
 class ClaimButton(discord.ui.Button[ClaimView]):
@@ -98,6 +107,40 @@ class KartLapsSelect(discord.ui.Select[ClaimView]):
             await interaction.response.send_message(f"找不到欄位 {position}", ephemeral=True)
             return
         await interaction.response.send_message(_fit_discord_message(format_kart_laps(session, kart)), ephemeral=True)
+
+
+class ParseModeButton(discord.ui.Button[ParseModeView]):
+    def __init__(self, session_id: str, mode: str, label: str, style: discord.ButtonStyle) -> None:
+        super().__init__(
+            label=label,
+            style=style,
+            custom_id=f"gokart:parse:{session_id}:{mode}",
+        )
+        self.session_id = session_id
+        self.mode = mode
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        assert self.view is not None
+        reparse_name = "reprocess_session_grid" if self.mode == "grid" else "reprocess_session_direct"
+        reparse = getattr(interaction.client, reparse_name, None)
+        if reparse is None:
+            await interaction.response.send_message("目前 bot 不支援這個解析方式。", ephemeral=True)
+            return
+        try:
+            await interaction.response.edit_message(content="正在辨識卡丁車成績表，請稍候...", embed=None, view=None)
+            session = await reparse(self.session_id)
+        except ValueError as exc:
+            if interaction.message is not None:
+                current = self.view.store.get_session(self.session_id)
+                await interaction.message.edit(content=str(exc), embed=None, view=ParseModeView(self.view.store, self.session_id) if current else None)
+            return
+        except Exception as exc:
+            if interaction.message is not None:
+                await interaction.message.edit(content=f"解析失敗：{exc}", embed=None, view=ParseModeView(self.view.store, self.session_id))
+            return
+        new_view = ClaimView(self.view.store, self.session_id)
+        if interaction.message is not None:
+            await interaction.message.edit(content=_fit_discord_message(format_session(session)), embed=None, view=new_view)
 
 
 def _fit_discord_message(content: str) -> str:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
 
 from .cell_ocr import CellOcrEngine
 from .grid_parser import parse_grid_sheet, parse_grid_sheet_with_virtual_rows
@@ -71,7 +70,7 @@ class OcrEngine:
 def _find_lap_cell(grid, header_cells) -> tuple[int, int] | None:
     from .grid_parser import looks_like_lap_nr
 
-    matches = [(row, col) for (row, col), cell in header_cells.items() if looks_like_lap_nr(cell.raw_text or cell.normalized_text)]
+    matches = [(row, col) for (row, col), cell in header_cells.items() if looks_like_lap_nr(cell.raw_text)]
     return sorted(matches, key=lambda item: (item[0], item[1]))[0] if matches else None
 
 
@@ -87,13 +86,13 @@ def _add_full_top_header_cell(grid, header_cells, table_words) -> None:
 def _cell_result(row: int, col: int, raw: str, confidence: float | None = None):
     from .cell_ocr import CellOcrResult
 
-    return CellOcrResult(row=row, col=col, raw_text=raw, normalized_text=" ".join(raw.strip().split()), confidence=confidence)
+    return CellOcrResult(row=row, col=col, raw_text=raw, confidence=confidence)
 
 
 def _find_avg_y(grid, header_cells, start_row: int) -> float | None:
     from .grid_parser import looks_like_avg
 
-    rows = [row for (row, _), cell in header_cells.items() if row >= start_row and looks_like_avg(cell.raw_text or cell.normalized_text)]
+    rows = [row for (row, _), cell in header_cells.items() if row >= start_row and looks_like_avg(cell.raw_text)]
     if not rows:
         return None
     cell = grid.cell(min(rows), 0)
@@ -103,7 +102,7 @@ def _find_avg_y(grid, header_cells, start_row: int) -> float | None:
 def _avg_cell_center(grid, header_cells, start_row: int) -> float | None:
     from .grid_parser import looks_like_avg
 
-    rows = [row for (row, _), cell in header_cells.items() if row >= start_row and looks_like_avg(cell.raw_text or cell.normalized_text)]
+    rows = [row for (row, _), cell in header_cells.items() if row >= start_row and looks_like_avg(cell.raw_text)]
     if not rows:
         return None
     cell = grid.cell(min(rows), 0)
@@ -111,7 +110,7 @@ def _avg_cell_center(grid, header_cells, start_row: int) -> float | None:
 
 
 def _column_words_from_table_words(table_words, region, mode: str):
-    from .cell_ocr import normalize_lap_text, parse_lap_time
+    from .cell_ocr import parse_lap_time
     from .lap_row_detector import looks_like_lap_candidate
 
     words = []
@@ -124,31 +123,12 @@ def _column_words_from_table_words(table_words, region, mode: str):
             continue
         text = word.text.strip()
         if mode == "lap_index":
-            text = re.sub(r"[^0-9]", "", text)
             if not text or not text.isdigit() or not (1 <= int(text) <= 80):
                 continue
         else:
-            text = re.sub(r"[^0-9.,:]", "", text)
-            if re.match(r"\d{3,}[.,:]", text):
-                text = _lap_time_suffix_candidate(text) or text
             if not looks_like_lap_candidate(text):
-                cleaned = _lap_time_suffix_candidate(text)
-                if cleaned is None:
-                    continue
-                text = cleaned
-            if parse_lap_time(normalize_lap_text(text)) is None:
+                continue
+            if parse_lap_time(text) is None:
                 continue
         words.append(type(word)(text, word.confidence, word.x, word.y, word.w, word.h))
     return sorted(words, key=lambda item: (item.center_y, item.center_x))
-
-
-def _lap_time_suffix_candidate(text: str) -> str | None:
-    from .cell_ocr import normalize_lap_text
-    from .lap_row_detector import looks_like_lap_candidate
-
-    for start in range(1, min(3, len(text)) + 1):
-        candidate = text[start:]
-        if looks_like_lap_candidate(candidate):
-            return candidate
-    normalized = normalize_lap_text(text)
-    return normalized if looks_like_lap_candidate(normalized) else None

@@ -14,7 +14,7 @@ def word(text: str, y: float) -> OcrWord:
 
 def test_detect_virtual_lap_rows_clusters_ocr_y_positions() -> None:
     rows = detect_virtual_lap_rows(
-        [word("1", 100), word("19.43", 102), word("2", 130), word("19,50", 132)],
+        [word("1", 100), word("19.43", 102), word("2", 130), word("19.50", 132)],
         lap_nr_y=80,
         table_height=200,
         min_y_gap=8,
@@ -27,10 +27,10 @@ def test_detect_virtual_lap_rows_clusters_ocr_y_positions() -> None:
 
 def test_looks_like_lap_candidate_variants() -> None:
     assert looks_like_lap_candidate("19.43")
-    assert looks_like_lap_candidate("19,43")
-    assert looks_like_lap_candidate("19:43")
-    assert looks_like_lap_candidate("1943")
-    assert looks_like_lap_candidate("l9.43")
+    assert not looks_like_lap_candidate("19,43")
+    assert not looks_like_lap_candidate("19:43")
+    assert not looks_like_lap_candidate("1943")
+    assert not looks_like_lap_candidate("l9.43")
 
 
 def test_fill_missing_virtual_rows_uses_cluster_pitch() -> None:

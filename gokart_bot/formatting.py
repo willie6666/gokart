@@ -11,6 +11,7 @@ def format_session(session: SessionRecord) -> str:
         title_parts.append(session.printed_time)
 
     lines = [" | ".join(title_parts)]
+    lines.append(f"解析方式：{_parse_mode_label(session.raw_ocr.get('mode'))}")
     if session.ocr_confidence is not None:
         lines.append(f"OCR 信心：{session.ocr_confidence:.2f}")
     if session.warnings:
@@ -36,6 +37,16 @@ def format_kart_line(kart: KartResult) -> str:
     laps = f"{len(kart.laps)} 圈" if kart.laps else "圈數未知"
     claimed = f"，已認領：{_driver_label(kart)}" if kart.claimed_by_user_id is not None or kart.claimed_by_name else ""
     return f"{kart_label}：最佳 {best}，平均 {avg}，{laps}{claimed}"
+
+
+def _parse_mode_label(mode: object) -> str:
+    if mode == "direct_paddleocr":
+        return "直接 PaddleOCR"
+    if mode == "grid_virtual_rows":
+        return "表格格線 + 虛擬圈列"
+    if mode == "grid":
+        return "表格格線"
+    return "未知"
 
 
 def format_laps(session: SessionRecord, kart_no: int | None = None) -> str:
